@@ -27,6 +27,7 @@ matplotlib.rcParams['font.family'] = 'Helvetica'
 plt.rcParams['axes.unicode_minus'] = False
 
 # add the modified umi_tools directory to python path
+# TODO copy files into repo
 sys.path.insert(0, '/usr/local/lib/python2.7/dist-packages/umi_tools-0.5.3-py2.7-linux-x86_64.egg/umi_tools/')
 import Utilities as U
 import network as network

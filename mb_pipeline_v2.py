@@ -123,6 +123,7 @@ if __name__ == "__main__":
     # global experiment variables
 
     # sample level
+
     sample_basename = 'v2_test'
     base = '/home/bdemaree/missionbio/' + sample_basename + '/'
     fastq_dir = base + 'fastq/'                     # raw fastq file directory (files should be .gz zipped)
@@ -135,6 +136,7 @@ if __name__ == "__main__":
     umi_counts_merged = ab_dir + sample_basename + '_umi_counts.tsv'        # sample umi counts file
 
     # single-cell level
+
     by_cell = base + 'cells/'
     by_cell_fastq_dir = by_cell + 'fastq/'             # directory for fastq by cell
     by_cell_bam_dir = by_cell + 'bam/'                 # directory for bam (and bai) by cell
