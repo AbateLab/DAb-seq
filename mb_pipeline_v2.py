@@ -123,7 +123,7 @@ if __name__ == "__main__":
     # global experiment variables
 
     # sample level
-
+    # TODO consolidate experiment variables
     sample_basename = 'v2_test'
     base = '/home/bdemaree/missionbio/' + sample_basename + '/'
     fastq_dir = base + 'fastq/'                     # raw fastq file directory (files should be .gz zipped)
