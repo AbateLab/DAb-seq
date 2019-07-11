@@ -157,9 +157,9 @@ class TapestriSample(object):
                 out_1.write('%s\n%s\n+\n%s\n' % (header_1, seq_1[trim:], qual_1[trim:]))
                 out_2.write('%s\n%s\n+\n%s\n' % (header_2, seq_2, qual_2))
 
-                # print counter
-                if bar_count % 1e6 == 0:
-                    print '%d valid read-pairs extracted and written to new fastq.' % bar_count
+                # # print counter
+                # if bar_count % 1e6 == 0:
+                #     print '%d valid read-pairs extracted and written to new fastq.' % bar_count
 
         # close fastq and save barcode json
         out_1.close()
@@ -171,88 +171,61 @@ class TapestriSample(object):
     def process_abs(self,
                     ab_barcodes,
                     barcode_descriptions,
-                    ab_3_handle,
-                    ab_5_handle,
+                    ab_handles,
                     ab_bar_coord,
                     ab_umi_coord,
                     min_umi_qual):
         # extract ab barcodes and umis from raw ab reads
-
-        # load cell barcode dictionary from file
-        cell_barcode_dict = json_import(self.ab_barcodes)
-
-        # invert dictionary to get read ids as keys, corrected cell barcodes as values
-        read_id_dict = {}
-        for bar in cell_barcode_dict:
-            for read_id in cell_barcode_dict[bar]:
-                read_id_dict[read_id] = bar
 
         # create dict for storing passed ab reads
         passed_ab_reads = {}
         passed_count = 0
 
         # use cutadapt to select reads with correct structure
-        ab_cmd = 'python3 /usr/local/bin/cutadapt -j 24 -g %s -a %s -O 12 -e 0.2 -n 2 %s --quiet ' \
-                 '--discard-untrimmed' % (ab_5_handle, ab_3_handle, self.ab_r2_temp)
+        ab_cmd = 'python3 /usr/local/bin/cutadapt -j 24 %s -O 12 -e 0.2 -n 2 %s --quiet ' \
+                 '--discard-untrimmed' % (ab_handles, self.ab_r2_temp)
 
         ab_process = subprocess.Popen(ab_cmd, stdout=subprocess.PIPE, shell=True)
 
         # iterate through ab reads with correct adapters
         for line in ab_process.stdout:
 
-            read_id = line.split(' ')[0]    # read id
+            # read_id = line.split(' ')[0]    # read id
 
-            while True:
+            cell_barcode = line.split('_')[1]  # extract corrected barcode from header
 
-                is_valid_read = True
-                skip_lines = False
+            # # check that this ab data has a good cell barcode
+            # if read_id not in read_id_dict:
+            #     # print 'invalid cell barcode'
+            #     break
 
-                # check that this ab data has a good cell barcode
-                if read_id not in read_id_dict:
-                    # print 'invalid cell barcode'
-                    break
+            # extract sequences
+            seq = ab_process.stdout.next().strip()
+            ab_process.stdout.next()
+            qual = ab_process.stdout.next().strip()
 
-                # extract sequences
-                seq = ab_process.stdout.next().strip()
-                ab_process.stdout.next()
-                qual = ab_process.stdout.next().strip()
-                skip_lines = False
+            # check trimmed read length
+            if len(seq) != len(ab_bar_coord + ab_umi_coord):
+                continue
 
-                # check cut read length
-                if len(seq) != len(ab_bar_coord + ab_umi_coord):
-                    # print 'read too short'
-                    break
+            # check ab barcode is valid
+            bar = ''.join([seq[i] for i in ab_bar_coord])
+            bar = correct_barcode(ab_barcodes, bar)
+            if bar == 'invalid':
+                continue
 
-                # check ab barcode is valid
-                bar = ''.join([seq[i] for i in ab_bar_coord])
-                bar = correct_barcode(ab_barcodes, bar)
+            # check umi quality
+            umi = ''.join([seq[i] for i in ab_umi_coord])
+            umi_qual = [ord(qual[i]) - 33 for i in ab_umi_coord]
+            if not all(q >= min_umi_qual for q in umi_qual):
+                continue
 
-                if bar == 'invalid':
-                    # print 'invalid ab barcode'
-                    is_valid_read = False
-
-                # check umi quality
-                umi = ''.join([seq[i] for i in ab_umi_coord])
-                umi_qual = [ord(qual[i]) - 33 for i in ab_umi_coord]
-
-                if not all(q >= min_umi_qual for q in umi_qual):
-                    # print 'low quality umi'
-                    is_valid_read = False
-
-                # if a read passes all filters, add it to a dictionary
-                if is_valid_read:
-                    passed_count += 1
-                    passed_ab_reads[passed_count] = {}
-                    passed_ab_reads[passed_count]['cell barcode'] = read_id_dict[read_id]
-                    passed_ab_reads[passed_count]['ab description'] = barcode_descriptions[bar]
-                    passed_ab_reads[passed_count]['raw umi'] = umi
-
-                break
-
-            if skip_lines:
-                ab_process.stdout.next()
-                ab_process.stdout.next()
-                ab_process.stdout.next()
+            # if a read passes all filters, add it to a dictionary
+            passed_count += 1
+            passed_ab_reads[passed_count] = {}
+            passed_ab_reads[passed_count]['cell barcode'] = cell_barcode#read_id_dict[read_id]
+            passed_ab_reads[passed_count]['ab description'] = barcode_descriptions[bar]
+            passed_ab_reads[passed_count]['raw umi'] = umi
 
         # write passed ab reads to tsv file
         with(open(self.ab_reads, 'w')) as f:
@@ -301,8 +274,8 @@ class TapestriSample(object):
 
                 reads_written += 1
 
-                if reads_written % 1e6 == 0:
-                    print '%d reads saved.' % reads_written
+                # if reads_written % 1e6 == 0:
+                #     print '%d reads saved.' % reads_written
 
             else:
                 r1.next(); r1.next(); r1.next();
@@ -317,7 +290,7 @@ class TapestriSample(object):
                 f.write(good_barcodes[barcode][i])
             f.close()
 
-        print '%d reads saved to %d cell fastq files.' % (reads_written, len(good_barcodes))
+        print 'Sample %d: %d reads saved to %d cell fastq files.' % (self.sample_num, reads_written, len(good_barcodes))
 
 class SingleCell(object):
     # class for storing metadata for each single cell file
@@ -734,6 +707,11 @@ def count_umis(ab_reads_file, umi_counts_file, n_procs=32):
     # number of threads should be less than or equal to number of umi groups
     if n_procs > len(group_ids):
         n_procs = len(group_ids)
+
+    # if no UMI groups found, quit program
+    if len(group_ids) == 0:
+        print 'No UMI groups found! Now exiting...\n'
+        raise SystemExit
 
     print 'Found %s UMI groups. Now clustering using %d threads.' % (len(group_ids), n_procs)
 
