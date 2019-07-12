@@ -18,6 +18,8 @@ from collections import Counter
 from itertools import izip
 import subprocess
 import sys
+import copy
+import pandas as pd
 
 # plotting
 import matplotlib
@@ -67,12 +69,65 @@ class TapestriSample(object):
         self.ab_reads = ab_reads                # file containing filtered ab reads
 
     def filter_valid_reads(self,
-                           cell_barcode_structure,
+                           r1_start,
                            mb_barcodes,
                            bar_ind_1,
                            bar_ind_2,
                            sample_type):
-        # filter r1 and r2 files to only keep reads with correct barcode structure in r1
+        # filter r1 files to only keep reads with correct barcode structure in r1
+
+        assert sample_type == 'ab' or sample_type == 'panel', 'Sample type must be panel or ab!'
+
+        # set filenames according to sample type (panel or ab)
+        if sample_type == 'panel':
+            r1_in = self.panel_r1
+            barcode_json = self.panel_barcodes
+
+        else:
+            r1_in = self.ab_r1
+            barcode_json = self.ab_barcodes
+
+        cmd = 'python3 /usr/local/bin/cutadapt' \
+              ' -a r1_start=%s' \
+              ' -j 16 -O 8 -e 0.2 %s --quiet' \
+              % (r1_start,
+                 r1_in)
+
+        trim_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+
+        read_id_dict = {}  # dict for storing read ids
+
+        # iterate through all Read 1 records
+        for line in trim_process.stdout:
+
+            # R1
+            header_1 = line.strip()  # header
+            id_1 = header_1.split(' ')[0][1:]  # read id
+            seq_1 = trim_process.stdout.next().strip()  # sequence string
+            trim_process.stdout.next()  # +
+            trim_process.stdout.next()  # qual
+
+            # find barcodes and check that they are a valid MB barcode
+            check = check_seq(seq_1, bar_ind_1, bar_ind_2, mb_barcodes)
+
+            if check == 'fail':
+                continue
+
+            else:
+                barcode = check[0] + check[1] + '-' + str(self.sample_num)
+                read_id_dict[id_1] = barcode
+
+        # export barcodes to json file
+        json_export(read_id_dict, barcode_json)
+
+    def barcode_reads(self,
+                      r1_start,
+                      r1_end,
+                      r2_end,
+                      r1_min_len,
+                      r2_min_len,
+                      sample_type):
+        # for valid reads, add barcode header to fastq file and trim
 
         assert sample_type == 'ab' or sample_type == 'panel', 'Sample type must be panel or ab!'
 
@@ -81,8 +136,8 @@ class TapestriSample(object):
             r1_in = self.panel_r1
             r2_in = self.panel_r2
 
-            r1_out = self.panel_r1_temp
-            r2_out = self.panel_r2_temp
+            r1_out = open(self.panel_r1_temp, 'w')
+            r2_out = open(self.panel_r2_temp, 'w')
 
             barcode_json = self.panel_barcodes
 
@@ -90,83 +145,71 @@ class TapestriSample(object):
             r1_in = self.ab_r1
             r2_in = self.ab_r2
 
-            r1_out = self.ab_r1_temp
-            r2_out = self.ab_r2_temp
+            r1_out = open(self.ab_r1_temp, 'w')
+            r2_out = open(self.ab_r2_temp, 'w')
 
             barcode_json = self.ab_barcodes
 
-        filter_cmd = 'python3 /usr/local/bin/cutadapt -g %s -m 100 -j 12 --interleaved' \
-                     ' --discard-untrimmed --no-trim --pair-filter=both -e 0.1 %s %s --quiet' \
-                     % (cell_barcode_structure,
-                        r1_in,
-                        r2_in)
+        read_id_dict = json_import(barcode_json)
 
-        filter_process = subprocess.Popen(filter_cmd, stdout=subprocess.PIPE, shell=True)
+        cmd = 'python3 /usr/local/bin/cutadapt' \
+              ' -g %s' \
+              ' -a %s' \
+              ' -A %s' \
+              ' --interleaved -j 16 -n 3 -O 8 -e 0.2 %s %s --quiet' \
+              % (r1_start,
+                 r1_end,
+                 r2_end,
+                 r1_in,
+                 r2_in)
 
-        # create output fastq files for writing
-        out_1 = open(r1_out, 'w')
-        out_2 = open(r2_out, 'w')
+        trim_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
 
-        # create dict for storing barcode information (will be exported to json)
-        barcodes = {}
+        bar_count = 0  # total count of all barcodes
 
-        trim = len(cell_barcode_structure) - 1  # base indices to trim from read 1
-        bar_count = 0
-
-        # iterate through all reads
-        for line in filter_process.stdout:
+        # iterate through all Read 1 records
+        for line in trim_process.stdout:
 
             # R1
-            header_1 = line.strip()                           # header
-            id_1 = header_1.split(' ')[0]                     # read id
-            seq_1 = filter_process.stdout.next().strip()      # sequence string
-            filter_process.stdout.next()                      # + sign
-            qual_1 = filter_process.stdout.next().strip()     # quality string
+            header_1 = line.strip()
+            id_1 = header_1.split(' ')[0][1:]
+            seq_1 = trim_process.stdout.next().strip()
+            trim_process.stdout.next()
+            qual_1 = trim_process.stdout.next().strip()
 
             # R2
-            header_2 = filter_process.stdout.next().strip()
-            id_2 = header_2.split(' ')[0]
-            seq_2 = filter_process.stdout.next().strip()
-            filter_process.stdout.next()
-            qual_2 = filter_process.stdout.next().strip()
+            header_2 = trim_process.stdout.next().strip()
+            id_2 = header_1.split(' ')[0][1:]
+            seq_2 = trim_process.stdout.next().strip()
+            trim_process.stdout.next()
+            qual_2 = trim_process.stdout.next().strip()
 
-            assert id_1 == id_2, 'read ids from paired-end files must match!'
+            assert id_1 == id_2, 'Read IDs do not match! Check input FASTQ files.'
 
-            # extract barcodes and check that they are a valid MB barcode
-            check = check_seq(seq_1, bar_ind_1, bar_ind_2, mb_barcodes)
+            try:
+                cell_barcode = read_id_dict[id_1]
+            except KeyError:
+                continue
 
-            if check == 'fail':
+            if len(seq_1) < r1_min_len or len(seq_2) < r2_min_len:
                 continue
 
             else:
-                barcode = check[0] + check[1] + '-' + str(self.sample_num)
+                # add barcode to header
+                id = '@' + id_1 + '_' + cell_barcode
+                header_1 = id
+                header_2 = id
+
+                # write to output fastq files
+                r1_out.write('%s\n%s\n+\n%s\n' % (header_1, seq_1, qual_1))
+                r2_out.write('%s\n%s\n+\n%s\n' % (header_2, seq_2, qual_2))
+
                 bar_count += 1
 
-                # add barcode to dict
-                try:
-                    barcodes[barcode].append(id_1)
+        print '%d total valid trimmed pairs saved to file.' % bar_count
 
-                except KeyError:
-                    barcodes[barcode] = [id_1]
-
-                # add barcode to headers
-                header_1 = header_1.split(' ')[0] + '_' + barcode + '_' + header_1.split(' ')[1]
-                header_2 = header_2.split(' ')[0] + '_' + barcode + '_' + header_2.split(' ')[1]
-
-                # save valid fastq records
-                out_1.write('%s\n%s\n+\n%s\n' % (header_1, seq_1[trim:], qual_1[trim:]))
-                out_2.write('%s\n%s\n+\n%s\n' % (header_2, seq_2, qual_2))
-
-                # # print counter
-                # if bar_count % 1e6 == 0:
-                #     print '%d valid read-pairs extracted and written to new fastq.' % bar_count
-
-        # close fastq and save barcode json
-        out_1.close()
-        out_2.close()
-        json_export(barcodes, barcode_json)
-
-        print '%d read-pairs written to %s and %s.\n' % (bar_count, r1_out, r2_out)
+        r1_out.close()
+        r2_out.close()
 
     def process_abs(self,
                     ab_barcodes,
@@ -190,14 +233,7 @@ class TapestriSample(object):
         # iterate through ab reads with correct adapters
         for line in ab_process.stdout:
 
-            # read_id = line.split(' ')[0]    # read id
-
-            cell_barcode = line.split('_')[1]  # extract corrected barcode from header
-
-            # # check that this ab data has a good cell barcode
-            # if read_id not in read_id_dict:
-            #     # print 'invalid cell barcode'
-            #     break
+            cell_barcode = line.strip().split('_')[1]  # extract corrected barcode from header
 
             # extract sequences
             seq = ab_process.stdout.next().strip()
@@ -223,7 +259,7 @@ class TapestriSample(object):
             # if a read passes all filters, add it to a dictionary
             passed_count += 1
             passed_ab_reads[passed_count] = {}
-            passed_ab_reads[passed_count]['cell barcode'] = cell_barcode#read_id_dict[read_id]
+            passed_ab_reads[passed_count]['cell barcode'] = cell_barcode
             passed_ab_reads[passed_count]['ab description'] = barcode_descriptions[bar]
             passed_ab_reads[passed_count]['raw umi'] = umi
 
@@ -234,68 +270,10 @@ class TapestriSample(object):
                 f.write(passed_ab_reads[ab]['ab description'] + '\t')
                 f.write(passed_ab_reads[ab]['raw umi'] + '\n')
 
-    def fastq_split_by_cell(self, min_reads, by_cell_fastq_dir):
-        # split fastq files into separate files for each valid cell
-
-        # load panel barcode json from file
-        barcodes = json_import(self.panel_barcodes)
-
-        # add counts for barcodes
-        for b in barcodes:
-            barcodes[b] = len(barcodes[b])
-
-        # dict of barcodes observed
-        good_barcodes = {}
-
-        r1 = open(self.panel_r1_temp, 'r')
-        r2 = open(self.panel_r2_temp, 'r')
-
-        reads_written = 0
-
-        # iterate through lines of the FASTQ files together
-
-        for line1, line2 in izip(r1, r2):
- 
-            barcode = line1.split('_')[1]   # extract corrected barcode from header
-
-            if barcodes[barcode] >= min_reads:
-
-                if barcode in good_barcodes:
-                    i = len(good_barcodes[barcode]) + 1
-                    good_barcodes[barcode][i] = ''.join([x for x in
-                                                        [line1, r1.next(), r1.next(), r1.next(),
-                                                         line2, r2.next(), r2.next(), r2.next()]])
-
-                else:
-                    good_barcodes[barcode] = {}
-                    good_barcodes[barcode][0] = ''.join([x for x in
-                                                        [line1, r1.next(), r1.next(), r1.next(),
-                                                         line2, r2.next(), r2.next(), r2.next()]])
-
-                reads_written += 1
-
-                # if reads_written % 1e6 == 0:
-                #     print '%d reads saved.' % reads_written
-
-            else:
-                r1.next(); r1.next(); r1.next();
-                r2.next(); r2.next(); r2.next();
-
-        r1.close()
-        r2.close()
-
-        for barcode in good_barcodes:
-            f = open('%s%s.fastq' % (by_cell_fastq_dir, barcode), 'w')
-            for i in good_barcodes[barcode]:
-                f.write(good_barcodes[barcode][i])
-            f.close()
-
-        print 'Sample %d: %d reads saved to %d cell fastq files.' % (self.sample_num, reads_written, len(good_barcodes))
-
 class SingleCell(object):
     # class for storing metadata for each single cell file
 
-    def __init__(self, cell_barcode, fastq_dir, bam_dir, vcf_dir, interval_dir):
+    def __init__(self, cell_barcode, fastq_dir, bam_dir, vcf_dir):
         # initialize object by generating filenames
 
         self.cell_barcode = cell_barcode                    # cell barcode
@@ -306,7 +284,6 @@ class SingleCell(object):
         self.bam = bam_dir + cell_barcode + '.bam'          # bam file
         self.bai = bam_dir + cell_barcode + '.bai'          # bam file index
         self.vcf = vcf_dir + cell_barcode + '.g.vcf'        # gvcf file
-        self.interval_aln = interval_dir + cell_barcode + '.tsv' # interval alignment file
 
         self.valid = False      # marker for valid cells
         self.alignments = {}    # alignment counts for each interval
@@ -339,19 +316,6 @@ class SingleCell(object):
 
         return process
 
-    def interval_alignments(self, interval_file):
-        # get number of reads aligned in intervals
-
-        int_aln_cmd = 'gatk CollectReadCounts -I %s -O %s -L %s --verbosity ERROR' \
-                      ' --interval-merging-rule OVERLAPPING_ONLY --format TSV' \
-                       % (self.bam,
-                          self.interval_aln,
-                          interval_file)
-
-        process = subprocess.Popen(int_aln_cmd, shell=True)
-
-        return process
-
     def call_variants(self, fasta, interval_file, dbsnp_file):
         # call variants using gatk
 
@@ -366,54 +330,6 @@ class SingleCell(object):
         process = subprocess.Popen(variants_cmd, shell=True)
 
         return process
-
-    def cell_caller(self, interval_dict, min_coverage, min_fraction):
-        # determine if a barcode is a valid cell using alignment counts
-
-        aln_dict = self.alignments_from_tsv(self.interval_aln, interval_dict)
-        self.alignments = aln_dict
-
-        # mark valid cells based on coverage uniformity
-        if len([a for a in aln_dict if aln_dict[a] >= min_coverage])/len(aln_dict) >= min_fraction:
-            self.valid = True
-
-    @staticmethod
-    def alignments_from_tsv(tsv_file, interval_dict):
-        # extracts alignment info from tsv file and imports into a dictionary
-
-        aln_dict = {}
-
-        with open(tsv_file) as f:
-            for line in f:
-
-                # skip header lines
-                if line[0] == '@' or line[:6] == 'CONTIG':
-                    continue
-
-                else:
-                    interval = line.strip().split('\t')[:3]
-                    # need to convert between 0 and 1 based coordinates
-                    interval = interval[0] + '_' + str(int(interval[1]) - 1) + '_' + str(int(interval[2]))
-                    aln_dict[interval_dict[interval]] = int(line.strip().split('\t')[3])
-
-        return aln_dict
-
-    @staticmethod
-    def generate_alignments_tsv(cells, interval_dict, out_file):
-        # create tsv with number of alignments for each amplicon across cells
-
-        amplicons = interval_dict.values()
-        amplicons.sort()
-
-        out = open(out_file, 'w')
-        out.write('barcode\t' + '\t'.join(amplicons) + '\n')
-
-        for c in cells:
-            if c.valid:
-                out.write(c.cell_barcode + '\t' + '\t'.join([str(c.alignments[a]) for a in amplicons]) + '\n')
-
-
-        out.close()
 
     @staticmethod
     def combine_gvcfs(cells, id, fasta, interval_file, dbsnp_file, merged_gvcf_dir, genotyping_dir, multi_sample = False):
@@ -461,6 +377,101 @@ class SingleCell(object):
         process = subprocess.Popen(genotype_cmd, shell=True)
 
         return process
+
+def count_alignments(r1_files, amplicon_file, fasta_file, genome_index, tsv, dir):
+    # align and count r1 reads for all barcodes, and save to tsv file
+
+    # extend amplicon coordinates by 2 bp on each end
+    slopped_intervals = dir + 'amplicons.slopped.bed'
+    subprocess.call('bedtools slop -i %s -g %s -b 2 > %s' % (amplicon_file, genome_index, slopped_intervals), shell=True)
+
+    # get fasta file from human genome for this interval
+    insert_fasta = dir + 'amplicons.fasta'
+    subprocess.call('bedtools getfasta -fi %s -bed %s -fo %s -name' % (fasta_file, slopped_intervals, insert_fasta), shell=True)
+
+    # build bt2 index for this fasta
+    insert_bt2 = dir + 'inserts'
+    subprocess.call('bowtie2-build %s %s' % (insert_fasta, insert_bt2), shell=True)
+
+    # extract names of reference sequences
+    refs = []
+    get_refs = subprocess.Popen('bowtie2-inspect -n %s' % insert_bt2, stdout=subprocess.PIPE, shell=True)
+    for line in get_refs.stdout:
+        refs.append(line.strip())
+    refs.sort()
+    refs_dict = dict(zip(refs, [0] * len(refs)))
+
+    # amplicon dict (key: cell barcode, value: list of amplicon counts)
+    amplicons = {}
+
+    # align reads with bowtie2
+    bt2_input = ' -U '.join(r1_files)
+    bt2_cmd = 'bowtie2 -p 64 -x %s -U %s' % (insert_bt2, bt2_input)
+    bt2_align = subprocess.Popen(bt2_cmd, stdout=subprocess.PIPE, shell=True)
+
+    # iterate through all reads
+    for line in bt2_align.stdout:
+
+        if line[0] == '@':  # ignore header lines
+            continue
+
+        record = line.split('\t')
+
+        flag = int(record[1])
+        unmapped = int(bin(flag)[-3])  # mapping bit (1: not mapped; 0: mapped)
+
+        if flag >= 256:
+            secondary = int(bin(flag)[-9])  # secondary bit (1: non-primary; 0: primary)
+        else:
+            secondary = 0
+
+        query_name = record[0]
+        cell_barcode = query_name.split('_')[1]
+        reference_name = record[2]
+
+        # check read is mapped
+        if unmapped == 1:
+            continue
+
+        # skip all secondary alignments
+        if secondary == 1:
+            continue
+
+        # save alignment to dict
+        try:
+            amplicons[cell_barcode][reference_name] += 1
+
+        except KeyError:
+            amplicons[cell_barcode] = copy.deepcopy(refs_dict)
+            amplicons[cell_barcode][reference_name] += 1
+
+    # write amplicon tsv to file for this sample
+    with open(tsv, 'w') as f:
+        f.write('cell_barcode\t' + '\t'.join(refs) + '\n')
+        for c in amplicons:
+            f.write(c + '\t' + '\t'.join([str(amplicons[c][r]) for r in refs]) + '\n')
+
+def cell_caller(tsv, min_coverage, min_fraction):
+    # determine if a barcode is a valid cell using alignment counts
+
+    # load barcode count tsv from file
+    all_tsv = pd.read_csv(tsv, sep='\t', header=0, index_col=0)
+    all_tsv.sort_index(inplace=True)
+
+    # counts for each barcode
+    num_reads = [int(i) for i in list(all_tsv.sum(axis=1))]
+    barcodes = dict(zip(list(all_tsv.index), num_reads))
+
+    # TODO call refine cell calling
+
+    num_targets = len(all_tsv.columns) - 1
+    min_reads_per_cell = min_coverage * min_fraction * num_targets * 5
+
+    valid_cells = [b for b in barcodes if barcodes[b] >= min_reads_per_cell]
+
+    print '%d valid cells found.' % len(valid_cells)
+
+    return valid_cells
 
 def json_import(filename):
     # imports json data into python. If json file does not exist, returns empty {}
@@ -587,7 +598,7 @@ def correct_barcode(barcodes, raw_barcode):
     # if correction fails
     return 'invalid'
 
-def count_umis(ab_reads_file, umi_counts_file, n_procs=32):
+def count_umis(ab_reads_file, umi_counts_file, n_procs=24):
     # count umis using selected clustering methods
 
     def extract_umis(ab_reads_file):

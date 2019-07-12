@@ -8,11 +8,13 @@ input requirements:
 -cell and ab barcode csvs
 -panel bed file
 
-software requirements:
+requires the following programs in path:
 -gatk
 -bowtie2
 -samtools
+-bedtools
 -cutadapt
+-bbmap
 
 umis counted using methods described in Genome Research paper by Smith et al:
 https://genome.cshlp.org/content/early/2017/01/18/gr.209601.116
@@ -25,12 +27,24 @@ import sys
 import argparse
 import copy
 from slackclient import SlackClient
+import time
 from multiprocessing import Process
 import ConfigParser
 
 # add mission bio cell processing script
 sys.path.insert(0, '/home/bdemaree/code/missionbio')
 import resources_v2
+
+def slack_message(message):
+    # for posting a notification to the server-alerts slack channel
+
+    channel = 'server-alerts'
+    token = 'xoxp-7171342752-7171794564-486340412737-91fd92781cde6307b077f30f9ea1b700'
+    sc = SlackClient(token)
+
+    sc.api_call('chat.postMessage', channel=channel,
+                text=message, username='pipelines',
+                icon_emoji=':adam:')
 
 def wait(processes):
     # waits for processes to finish
@@ -220,12 +234,18 @@ if __name__ == "__main__":
         raise SystemExit
 
     # create all other directories for this run
-    # if it already exists, continue
+    # if it already exists, ignore and continue
     dirs = [all_vars[d] for d in all_vars if '_dir' in d]
     dirs.sort()
     for d in dirs:
         if not os.path.exists(d):
             os.mkdir(d)
+
+    # send slack notification
+    start_time = time.time()
+    start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
+    slack_message('Pipeline started at %s.' % start_time_fmt)
+
 
     print '''
 ####################################################################################
@@ -259,12 +279,15 @@ if __name__ == "__main__":
     # for panel reads, filter reads with valid barcode structure and export to new fastq
     print 'Extracting barcodes from raw fastq files...\n'
 
+    # first, identify reads with valid barcode
+
     process_barcodes = []
+
     for sample in samples:
         # panel files
         p = Process(
             target=sample.filter_valid_reads,
-            args=(cell_barcode_structure,
+            args=(r1_start,
                   barcodes,
                   bar_ind_1,
                   bar_ind_2,
@@ -275,7 +298,7 @@ if __name__ == "__main__":
         # ab files
         p = Process(
             target=sample.filter_valid_reads,
-            args=(cell_barcode_structure,
+            args=(r1_start,
                   barcodes,
                   bar_ind_1,
                   bar_ind_2,
@@ -287,10 +310,43 @@ if __name__ == "__main__":
     for p in process_barcodes:
         p.join()
 
+    # second, cut adapters from reads and add barcodes to header
+
+    cut_adapters = []
+
+    for sample in samples:
+        # panel files
+        p = Process(
+            target=sample.barcode_reads,
+            args=(r1_start,
+                  r1_end,
+                  r2_end,
+                  r1_min_len_panel,
+                  r2_min_len_panel,
+                  'panel'))
+        cut_adapters.append(p)
+        p.start()
+
+        # ab files
+        p = Process(
+            target=sample.barcode_reads,
+            args=(r1_start,
+                  r1_end,
+                  r2_end,
+                  r1_min_len_ab,
+                  r2_min_len_ab,
+                  'ab'))
+        cut_adapters.append(p)
+        p.start()
+
+    # wait for processes to finish
+    for p in cut_adapters:
+        p.join()
+
     print '''
-###################################################################################
-Step 3: import ab reads, error correct, and count
-###################################################################################
+# ###################################################################################
+# Step 3: import ab reads, error correct, and count
+# ###################################################################################
 '''
 
     # load ab barcode csv file (with descriptions)
@@ -335,44 +391,69 @@ Step 3: import ab reads, error correct, and count
 
     print '''
 ###################################################################################
-Step 4: write valid cells from panel reads to separate fastq files
+Step 4: count read alignments to inserts
 ###################################################################################
 '''
 
-    # calculate minimum reads per cell for first pass
-    num_intervals = sum(1 for line in open(interval_file)) - 1
-    min_reads = min_coverage * min_fraction * num_intervals
+    # get r1 reads for all panel samples
+    panel_r1_files = [s.panel_r1_temp for s in samples]
 
-    # split cell fastq files for panel reads for cells with minimum number of reads
+    # align r1 reads to inserts to obtain read counts across all barcodes
+    resources_v2.count_alignments(panel_r1_files, amplicon_file, human_fasta_file, human_genome_index, all_tsv, temp_dir)
+
+    print '''
+###################################################################################
+Step 5: call valid cells using selected method
+###################################################################################
+'''
+
+    # call valid cells using cell_caller function
+    valid_cells = resources_v2.cell_caller(all_tsv, min_coverage, min_fraction)
+
+    # create SingleCell objects for each valid cell
+    cells = [resources_v2.SingleCell(barcode,
+                                     by_cell_fastq_dir,
+                                     by_cell_bam_dir,
+                                     by_cell_gvcf_dir)
+             for barcode in valid_cells]
+
+    print '''
+###################################################################################
+Step 6: write valid cells from panel reads to separate fastq files
+###################################################################################
+'''
+
+    # check that all barcodes have the same length
+    bar_length = list(set([len(k) for k in valid_cells]))
+    assert len(bar_length) == 1, 'All barcodes must have the same length!'
+
+    # split cell fastq files for panel reads associated with valid cells
+    barcode_names = temp_dir + 'barcodes.txt'
+    with open(barcode_names, 'w') as f:
+        for b in valid_cells:
+            f.write(b + '\n')
+
+    # split files by cell barcode using bbmap demuxbyname.sh
     split_files = []
     for sample in samples:
-        # panel files
-        p = Process(
-            target=sample.fastq_split_by_cell,
-            args=(min_reads, by_cell_fastq_dir))
+        demux_cmd = 'demuxbyname.sh prefixmode=f length=%d in1=%s in2=%s out=%s names=%s' % (
+            bar_length[0],
+            sample.panel_r1_temp,
+            sample.panel_r2_temp,
+            by_cell_fastq_dir + '%.fastq',
+            barcode_names
+        )
+        p = subprocess.Popen(demux_cmd, shell=True)
         split_files.append(p)
-        p.start()
 
     # wait for processes to finish
-    for p in split_files:
-        p.join()
+    wait(split_files)
 
     print '''
 ####################################################################################
-# Step 5: align, convert, sort, index panel reads
+# Step 7: align, convert, sort, index panel reads
 ####################################################################################
 '''
-
-    # find all single-cell fastq files in directory
-    cell_filenames = [f for f in os.listdir(by_cell_fastq_dir) if f.split('.')[-1] == 'fastq']
-
-    # add cell file information to SingleCell objects
-    cells = [resources_v2.SingleCell(f.split('.')[0],
-                                     by_cell_fastq_dir,
-                                     by_cell_bam_dir,
-                                     by_cell_gvcf_dir,
-                                     by_cell_interval_dir)
-             for f in cell_filenames]
 
     # preprocess cells in chunks (hardware-limited)
     # size of chunks for preprocessing batching (based on hardware limitations)
@@ -393,31 +474,13 @@ Step 4: write valid cells from panel reads to separate fastq files
         # wait for all processes to finish before continuing
         wait(index_bam)
 
-        # get read counts in intervals
-        interval_counts = [resources_v2.SingleCell.interval_alignments(cell, interval_file) for cell in chunk]
-        # wait for all processes to finish before continuing
-        wait(interval_counts)
-
         cells_processed += samples_per_chunk
 
-        print '\n%d of %d cells pre-processed.\n' % (cells_processed, len(cells))
-
-    # call cells based on alignment information
-    interval_dict = dict(zip(['_'.join(line.strip().split('\t')[:3]) for line in open(interval_file)],
-                             [line.strip().split('\t')[3] for line in open(interval_file)]))
-
-    for cell in cells:
-        resources_v2.SingleCell.cell_caller(cell, interval_dict, min_coverage, min_fraction)
-
-    # write alignment tsv file
-    resources_v2.SingleCell.generate_alignments_tsv(cells, interval_dict, base_dir + sample_basename + '.alignments.tsv')
-
-    # for rest of analysis, only include valid (called) cells
-    cells = [c for c in cells if c.valid]
+        print '\n%d of %d cells pre-processed.' % (cells_processed, len(cells))
 
     print '''
 ####################################################################################
-# Step 6: variant calling on cells
+# Step 8: perform variant calling for all cells
 ####################################################################################
 '''
 
@@ -446,7 +509,7 @@ Step 4: write valid cells from panel reads to separate fastq files
 
     print '''
 ####################################################################################
-# Step 7: combine gvcf files
+# Step 9: combine gvcf files
 ####################################################################################
 '''
 
@@ -501,7 +564,7 @@ Step 4: write valid cells from panel reads to separate fastq files
 
     print '''
 ####################################################################################
-# Step 8: genotype merged gvcfs
+# Step 10: genotype merged gvcfs
 ####################################################################################
 '''
     genotype_gvcfs = [resources_v2.SingleCell.genotype_gvcfs(human_fasta_file,
@@ -513,3 +576,8 @@ Step 4: write valid cells from panel reads to separate fastq files
     wait(genotype_gvcfs)
 
     print 'Pipeline complete!'
+
+    # send slack notification
+    elapsed_time = time.time() - start_time
+    elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+    slack_message('Pipeline complete! Total elapsed time is %s.' % elapsed_time_fmt)
