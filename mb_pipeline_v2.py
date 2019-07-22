@@ -29,10 +29,9 @@ import copy
 from slackclient import SlackClient
 import time
 from multiprocessing import Process
-import ConfigParser
 
-# add mission bio cell processing script
-sys.path.insert(0, '/home/bdemaree/code/missionbio')
+# add umi-tools folder to path
+sys.path.insert(0, 'umi-tools')
 import resources_v2
 
 def slack_message(message):
@@ -164,10 +163,11 @@ if __name__ == "__main__":
     -panel bed file
     
     software requirements:
-    -gatk
+    -gatk 4
     -bowtie2
     -samtools
     -cutadapt
+    -bedtools
     ''', formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument('cfg_file', type=str, help='config filename')
@@ -178,17 +178,32 @@ if __name__ == "__main__":
 
     print '''
     
-     ______   _______  ______        _______  _______  _______ 
-    (  __  \ (  ___  )(  ___ \      (  ____ \(  ____ \(  ___  )
-    | (  \  )| (   ) || (   ) )     | (    \/| (    \/| (   ) |
-    | |   ) || (___) || (__/ /_____ | (_____ | (__    | |   | |
-    | |   | ||  ___  ||  __ ((_____)(_____  )|  __)   | |   | |
-    | |   ) || (   ) || (  \ \            ) || (      | | /\| |
-    | (__/  )| )   ( || )___) )     /\____) || (____/\| (_\ \ |
-    (______/ |/     \||/ \___/      \_______)(_______/(____\/_)
-
-
-    Initializing pipeline...
+                                                                                                                                              
+                                                bbbbbbbb                                                                                      
+DDDDDDDDDDDDD                  AAA              b::::::b                                                                                      
+D::::::::::::DDD              A:::A             b::::::b                                                                                      
+D:::::::::::::::DD           A:::::A            b::::::b                                                                                      
+DDD:::::DDDDD:::::D         A:::::::A            b:::::b                                                                                      
+  D:::::D    D:::::D       A:::::::::A           b:::::bbbbbbbbb                         ssssssssss       eeeeeeeeeeee       qqqqqqqqq   qqqqq
+  D:::::D     D:::::D     A:::::A:::::A          b::::::::::::::bb                     ss::::::::::s    ee::::::::::::ee    q:::::::::qqq::::q
+  D:::::D     D:::::D    A:::::A A:::::A         b::::::::::::::::b                  ss:::::::::::::s  e::::::eeeee:::::ee q:::::::::::::::::q
+  D:::::D     D:::::D   A:::::A   A:::::A        b:::::bbbbb:::::::b --------------- s::::::ssss:::::se::::::e     e:::::eq::::::qqqqq::::::qq
+  D:::::D     D:::::D  A:::::A     A:::::A       b:::::b    b::::::b -:::::::::::::-  s:::::s  ssssss e:::::::eeeee::::::eq:::::q     q:::::q 
+  D:::::D     D:::::D A:::::AAAAAAAAA:::::A      b:::::b     b:::::b ---------------    s::::::s      e:::::::::::::::::e q:::::q     q:::::q 
+  D:::::D     D:::::DA:::::::::::::::::::::A     b:::::b     b:::::b                       s::::::s   e::::::eeeeeeeeeee  q:::::q     q:::::q 
+  D:::::D    D:::::DA:::::AAAAAAAAAAAAA:::::A    b:::::b     b:::::b                 ssssss   s:::::s e:::::::e           q::::::q    q:::::q 
+DDD:::::DDDDD:::::DA:::::A             A:::::A   b:::::bbbbbb::::::b                 s:::::ssss::::::se::::::::e          q:::::::qqqqq:::::q 
+D:::::::::::::::DDA:::::A               A:::::A  b::::::::::::::::b                  s::::::::::::::s  e::::::::eeeeeeee   q::::::::::::::::q 
+D::::::::::::DDD A:::::A                 A:::::A b:::::::::::::::b                    s:::::::::::ss    ee:::::::::::::e    qq::::::::::::::q 
+DDDDDDDDDDDDD   AAAAAAA                   AAAAAAAbbbbbbbbbbbbbbbb                      sssssssssss        eeeeeeeeeeeeee      qqqqqqqq::::::q 
+                                                                                                                                      q:::::q 
+                                                                                                                                      q:::::q 
+                                                                                                                                     q:::::::q
+                                                                                                                                     q:::::::q
+                                                                                                                                     q:::::::q
+                                                                                                                                     qqqqqqqqq
+                                                                                                                                              
+Initializing pipeline...
 
     '''
 
