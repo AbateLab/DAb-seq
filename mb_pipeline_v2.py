@@ -30,9 +30,9 @@ from slackclient import SlackClient
 import time
 from multiprocessing import Process
 
-# add umi-tools folder to path
-sys.path.insert(0, 'umi-tools')
+# import functions from external files
 import resources_v2
+import cell_calling
 
 def slack_message(message):
     # for posting a notification to the server-alerts slack channel
@@ -414,6 +414,7 @@ Step 4: count read alignments to inserts
     panel_r1_files = [s.panel_r1_temp for s in samples]
 
     # align r1 reads to inserts to obtain read counts across all barcodes
+    all_tsv = barcode_dir + sample_basename + '.all.tsv'  # alignment counts for all barcodes
     resources_v2.count_alignments(panel_r1_files, amplicon_file, human_fasta_file, human_genome_index, all_tsv, temp_dir)
 
     print '''
@@ -423,7 +424,7 @@ Step 5: call valid cells using selected method
 '''
 
     # call valid cells using cell_caller function
-    valid_cells = resources_v2.cell_caller(all_tsv, min_coverage, min_fraction)
+    valid_cells = cell_calling.call(barcode_dir, sample_basename, 'second_derivative', True)
 
     # create SingleCell objects for each valid cell
     cells = [resources_v2.SingleCell(barcode,

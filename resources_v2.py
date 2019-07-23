@@ -21,16 +21,8 @@ import sys
 import copy
 import pandas as pd
 
-# plotting
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-matplotlib.rcParams['font.family'] = 'Helvetica'
-plt.rcParams['axes.unicode_minus'] = False
-
 # add the modified umi_tools directory to python path
-# TODO copy files into repo
-sys.path.insert(0, '/usr/local/lib/python2.7/dist-packages/umi_tools-0.5.3-py2.7-linux-x86_64.egg/umi_tools/')
+sys.path.append(os.path.join(sys.path[0], 'umi_tools'))
 import Utilities as U
 import network as network
 
@@ -450,28 +442,6 @@ def count_alignments(r1_files, amplicon_file, fasta_file, genome_index, tsv, dir
         f.write('cell_barcode\t' + '\t'.join(refs) + '\n')
         for c in amplicons:
             f.write(c + '\t' + '\t'.join([str(amplicons[c][r]) for r in refs]) + '\n')
-
-def cell_caller(tsv, min_coverage, min_fraction):
-    # determine if a barcode is a valid cell using alignment counts
-
-    # load barcode count tsv from file
-    all_tsv = pd.read_csv(tsv, sep='\t', header=0, index_col=0)
-    all_tsv.sort_index(inplace=True)
-
-    # counts for each barcode
-    num_reads = [int(i) for i in list(all_tsv.sum(axis=1))]
-    barcodes = dict(zip(list(all_tsv.index), num_reads))
-
-    # TODO call refine cell calling
-
-    num_targets = len(all_tsv.columns) - 1
-    min_reads_per_cell = min_coverage * min_fraction * num_targets * 5
-
-    valid_cells = [b for b in barcodes if barcodes[b] >= min_reads_per_cell]
-
-    print '%d valid cells found.' % len(valid_cells)
-
-    return valid_cells
 
 def json_import(filename):
     # imports json data into python. If json file does not exist, returns empty {}
