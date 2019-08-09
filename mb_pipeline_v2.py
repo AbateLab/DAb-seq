@@ -1,6 +1,6 @@
 '''
 
-dab-seq: single-cell abseq + genotyping
+dab-seq: single-cell dna genotyping and antibody sequencing
 ben demaree 7.9.2019
 
 input requirements:
@@ -154,7 +154,8 @@ def generate_samples(R1_files, R2_files):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='''
-    dab-seq: single-cell abseq + genotyping
+    
+    dab-seq: single-cell dna genotyping and antibody sequencing
     ben demaree 2019
     
     input requirements:
@@ -168,13 +169,17 @@ if __name__ == "__main__":
     -samtools
     -cutadapt
     -bedtools
+    -bbmap
+    
     ''', formatter_class=argparse.RawTextHelpFormatter)
 
+    parser.add_argument('sample_name', type=str, help='sample basename')
     parser.add_argument('cfg_file', type=str, help='config filename')
 
     args = parser.parse_args()  # parse arguments
 
-    cfg_f = args.cfg_file  # config filename
+    sample_basename = args.sample_name
+    cfg_f = args.cfg_file
 
     print '''
     
@@ -239,13 +244,21 @@ Initializing pipeline...
         print '\nExiting...\n'
         raise SystemExit
 
-    # check that the input fastq directory exists and is not empty
-    if not os.path.exists(fastq_dir):
-        print 'FASTQ input directory (%s) does not exist! Exiting...\n' % fastq_dir
+    # check that the input fastq directories exist and are not empty
+    if not os.path.exists(panel_fastq_dir):
+        print 'FASTQ input directory (%s) does not exist! Exiting...\n' % panel_fastq_dir
         raise SystemExit
 
-    elif os.listdir(fastq_dir) == []:
-        print 'FASTQ input directory (%s) is empty! Exiting...\n' % fastq_dir
+    elif os.listdir(panel_fastq_dir) == []:
+        print 'FASTQ input directory (%s) is empty! Exiting...\n' % panel_fastq_dir
+        raise SystemExit
+
+    if not os.path.exists(ab_fastq_dir):
+        print 'FASTQ input directory (%s) does not exist! Exiting...\n' % ab_fastq_dir
+        raise SystemExit
+
+    elif os.listdir(ab_fastq_dir) == []:
+        print 'FASTQ input directory (%s) is empty! Exiting...\n' % ab_fastq_dir
         raise SystemExit
 
     # create all other directories for this run
@@ -259,7 +272,7 @@ Initializing pipeline...
     # send slack notification
     start_time = time.time()
     start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
-    slack_message('Pipeline started at %s.' % start_time_fmt)
+    slack_message('Pipeline started for sample %s at %s.' % (sample_basename, start_time_fmt))
 
 
     print '''
@@ -269,7 +282,15 @@ Initializing pipeline...
     '''
 
     # get all fastq filenames
-    R1_files, R2_files = get_fastq_names(fastq_dir)
+    R1_files_panel, R2_files_panel = get_fastq_names(panel_fastq_dir)
+    R1_files_ab, R2_files_ab = get_fastq_names(ab_fastq_dir)
+
+    # combine panel and ab fastq files
+    R1_files = R1_files_panel + R1_files_ab
+    R2_files = R2_files_panel + R2_files_ab
+
+    R1_files.sort()
+    R2_files.sort()
 
     # store sample info in Sample objects
     samples = generate_samples(R1_files, R2_files)
@@ -591,9 +612,17 @@ Step 6: write valid cells from panel reads to separate fastq files
     # wait for all processes to finish before continuing
     wait(genotype_gvcfs)
 
+    print '''
+####################################################################################
+# Step 11: cleanup temporary files
+####################################################################################
+'''
+
+    #TODO add code to delete unnecessary files
+
     print 'Pipeline complete!'
 
     # send slack notification
     elapsed_time = time.time() - start_time
     elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
-    slack_message('Pipeline complete! Total elapsed time is %s.' % elapsed_time_fmt)
+    slack_message('Pipeline complete for sample %s! Total elapsed time is %s.' % (sample_basename, elapsed_time_fmt))
