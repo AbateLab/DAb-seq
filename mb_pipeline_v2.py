@@ -3,19 +3,6 @@
 dab-seq: single-cell dna genotyping and antibody sequencing
 ben demaree 7.9.2019
 
-input requirements:
--raw fastq files (panel and abs)
--cell and ab barcode csvs
--panel bed file
-
-requires the following programs in path:
--gatk
--bowtie2
--samtools
--bedtools
--cutadapt
--bbmap
-
 umis counted using methods described in Genome Research paper by Smith et al:
 https://genome.cshlp.org/content/early/2017/01/18/gr.209601.116
 
@@ -23,12 +10,13 @@ https://genome.cshlp.org/content/early/2017/01/18/gr.209601.116
 
 import os
 import subprocess
-import sys
 import argparse
 import copy
 from slackclient import SlackClient
 import time
 from multiprocessing import Process
+from multiprocessing.pool import ThreadPool
+import shutil
 
 # import functions from external files
 import resources_v2
@@ -159,17 +147,20 @@ if __name__ == "__main__":
     ben demaree 2019
     
     input requirements:
+    -config file defining 
     -raw fastq files (panel and abs)
     -cell and ab barcode csvs
     -panel bed file
     
-    software requirements:
-    -gatk 4
+    requires the following programs in path:
+    -gatk
     -bowtie2
     -samtools
-    -cutadapt
     -bedtools
+    -bcftools
+    -cutadapt
     -bbmap
+    -snpEff
     
     ''', formatter_class=argparse.RawTextHelpFormatter)
 
@@ -226,6 +217,13 @@ Initializing pipeline...
                 else:
                     var = line.split("#", 1)[0].strip()  # to remove inline comments
                     exec(var)
+
+
+    # save a copy of the config file used for the run to the base output directory
+    try:
+        shutil.copy(cfg_f, base_dir)
+    except shutil.Error:
+        pass
 
     # check all files exist
     all_vars = copy.copy(globals())
@@ -436,7 +434,7 @@ Step 4: count read alignments to inserts
 
     # align r1 reads to inserts to obtain read counts across all barcodes
     all_tsv = barcode_dir + sample_basename + '.all.tsv'  # alignment counts for all barcodes
-    resources_v2.count_alignments(panel_r1_files, amplicon_file, human_fasta_file, human_genome_index, all_tsv, temp_dir)
+    resources_v2.count_alignments(panel_r1_files, amplicon_file, human_fasta_file, all_tsv, temp_dir)
 
     print '''
 ###################################################################################
@@ -492,28 +490,18 @@ Step 6: write valid cells from panel reads to separate fastq files
 ####################################################################################
 '''
 
-    # preprocess cells in chunks (hardware-limited)
-    # size of chunks for preprocessing batching (based on hardware limitations)
-    samples_per_chunk = 300
-    cells_processed = 0
+    # limit number of cells to preprocess at a time (this is hardware-limited)
+    n_preprocess = 300
 
-    # split cell list into chunks
-    sample_chunks = [cells[i:i + samples_per_chunk] for i in xrange(0, len(cells), samples_per_chunk)]
+    # create pool of workers and run through all samples
+    preprocess_pool = ThreadPool(processes=n_preprocess)
 
-    for chunk in sample_chunks:
-        # preprocess cells for variant calling
-        preprocess_cells = [resources_v2.SingleCell.align_sample(cell, bt2_ref) for cell in chunk]
-        # wait for all processes to finish before continuing
-        wait(preprocess_cells)
+    for c in cells:
+        preprocess_pool.apply_async(resources_v2.SingleCell.align_and_index, args=(c, bt2_ref,))
 
-        # index bam files
-        index_bam = [resources_v2.SingleCell.index_bam(cell) for cell in chunk]
-        # wait for all processes to finish before continuing
-        wait(index_bam)
+    preprocess_pool.close()
+    preprocess_pool.join()
 
-        cells_processed += samples_per_chunk
-
-        print '\n%d of %d cells pre-processed.' % (cells_processed, len(cells))
 
     print '''
 ####################################################################################
@@ -521,28 +509,20 @@ Step 6: write valid cells from panel reads to separate fastq files
 ####################################################################################
 '''
 
-    # call variants on cells in chunks (hardware-limited)
-    # size of chunks for variant call batching (based on hardware limitations)
-    samples_per_chunk = 50
-    cells_processed = 0
+    # limit number of cells to call variants at a time (this is hardware-limited)
+    n_call_variants = 50
 
-    # split cell list into chunks
-    sample_chunks = [cells[i:i + samples_per_chunk] for i in xrange(0, len(cells), samples_per_chunk)]
+    # create pool of workers and run through all samples
+    call_variants_pool = ThreadPool(processes=n_call_variants)
 
-    for chunk in sample_chunks:
-        # perform variant calling on cells
-        variant_calling = [resources_v2.SingleCell.call_variants(cell,
-                                                                 human_fasta_file,
-                                                                 interval_file,
-                                                                 dbsnp_file)
-                           for cell in chunk]
+    for c in cells:
+        call_variants_pool.apply_async(resources_v2.SingleCell.call_variants, args=(c,
+                                                                                   human_fasta_file,
+                                                                                   interval_file,
+                                                                                   dbsnp_file,))
 
-        # wait for all processes to finish before continuing
-        wait(variant_calling)
-
-        cells_processed += samples_per_chunk
-
-        print '\n%d of %d cells genotyped.\n' % (cells_processed, len(cells))
+    call_variants_pool.close()
+    call_variants_pool.join()
 
     print '''
 ####################################################################################
@@ -552,7 +532,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 
     # combine gvcfs in chunks (hardware-limited)
     # size of chunks for gvcf merger batching (based on hardware limitations)
-    samples_per_chunk = 200
+    samples_per_chunk = 100
     cells_processed = 0
 
     # split cell list into chunks
@@ -614,10 +594,32 @@ Step 6: write valid cells from panel reads to separate fastq files
 
     print '''
 ####################################################################################
-# Step 11: cleanup temporary files
+# Step 11: split multiallelic sites and annotate vcf
+####################################################################################
+'''
+    # split multiallelic sites into multiple lines
+    split_cmd = 'bcftools norm -m - %s -o %s' % (geno_gvcf, split_gvcf)
+    subprocess.call(split_cmd, shell=True)
+
+    # annotate vcf with snpeff
+    annotate_cmd = 'snpEff ann -v -stats %s -c %s hg19 %s > %s' % (snpeff_summary, snpeff_config, split_gvcf, annot_gvcf)
+    subprocess.call(annotate_cmd, shell=True)
+
+
+    print '''
+####################################################################################
+# Step 12: convert vcf to variant matrix
 ####################################################################################
 '''
 
+    # parse vcf and save to tables
+    resources_v2.vcf_to_tables(annot_gvcf, geno_hdf5, variants_tsv)
+
+    print '''
+####################################################################################
+# Step 13: cleanup temporary files
+####################################################################################
+'''
     #TODO add code to delete unnecessary files
 
     print 'Pipeline complete!'

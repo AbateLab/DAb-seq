@@ -7,24 +7,11 @@ written by ben 11.25.2018
 
 # modules
 from __future__ import division
-import os
-import os.path
-import collections
-import csv
-from itertools import product, combinations, izip, groupby
-from multiprocessing import Process, Queue
-import json
-from collections import Counter
-from itertools import izip
-import subprocess
-import sys
-import copy
 import numpy as np
 import pandas as pd
 
 # peak calling
 from scipy.stats import binned_statistic
-from scipy.interpolate import UnivariateSpline
 from scipy.signal import savgol_filter
 from scipy.signal import find_peaks
 

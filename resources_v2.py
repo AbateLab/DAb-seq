@@ -9,17 +9,18 @@ written by ben 11.25.2018
 from __future__ import division
 import os
 import os.path
-import collections
 import csv
-from itertools import product, combinations, izip, groupby
+from itertools import product, combinations, groupby
 from multiprocessing import Process, Queue
 import json
 from collections import Counter
-from itertools import izip
+import numpy as np
 import subprocess
 import sys
 import copy
+import allel
 import pandas as pd
+import h5py
 
 # add the modified umi_tools directory to python path
 sys.path.append(os.path.join(sys.path[0], 'umi_tools'))
@@ -81,7 +82,7 @@ class TapestriSample(object):
 
         cmd = 'python3 /usr/local/bin/cutadapt' \
               ' -a r1_start=%s' \
-              ' -j 16 -O 8 -e 0.2 %s --quiet' \
+              ' -j 16 -O 6 -e 0.2 %s --quiet' \
               % (r1_start,
                  r1_in)
 
@@ -133,7 +134,19 @@ class TapestriSample(object):
 
             barcode_json = self.panel_barcodes
 
-        else:
+            # TODO make read 1 cutting parameter (-u 51) intelligent
+
+            # cutadapt cmd for panel (trim read before finding adapter)
+            cmd = 'python3 /usr/local/bin/cutadapt' \
+                  ' -a %s' \
+                  ' -A %s' \
+                  ' --interleaved -j 16 -u 51 -U 5 -n 3 -O 8 -e 0.2 %s %s --quiet' \
+                  % (r1_end,
+                     r2_end,
+                     r1_in,
+                     r2_in)
+
+        elif sample_type == 'ab':
             r1_in = self.ab_r1
             r2_in = self.ab_r2
 
@@ -142,18 +155,19 @@ class TapestriSample(object):
 
             barcode_json = self.ab_barcodes
 
-        read_id_dict = json_import(barcode_json)
+            # cutadapt cmd for abs
+            cmd = 'python3 /usr/local/bin/cutadapt' \
+                  ' -g %s' \
+                  ' -a %s' \
+                  ' -A %s' \
+                  ' --interleaved -j 16 -n 3 -O 8 -e 0.2 %s %s --quiet' \
+                  % (r1_start,
+                     r1_end,
+                     r2_end,
+                     r1_in,
+                     r2_in)
 
-        cmd = 'python3 /usr/local/bin/cutadapt' \
-              ' -g %s' \
-              ' -a %s' \
-              ' -A %s' \
-              ' --interleaved -j 16 -n 3 -O 8 -e 0.2 %s %s --quiet' \
-              % (r1_start,
-                 r1_end,
-                 r2_end,
-                 r1_in,
-                 r2_in)
+        read_id_dict = json_import(barcode_json)
 
         trim_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
 
@@ -171,7 +185,7 @@ class TapestriSample(object):
 
             # R2
             header_2 = trim_process.stdout.next().strip()
-            id_2 = header_1.split(' ')[0][1:]
+            id_2 = header_2.split(' ')[0][1:]
             seq_2 = trim_process.stdout.next().strip()
             trim_process.stdout.next()
             qual_2 = trim_process.stdout.next().strip()
@@ -280,33 +294,26 @@ class SingleCell(object):
         self.valid = False      # marker for valid cells
         self.alignments = {}    # alignment counts for each interval
 
-    def align_sample(self, bt2_ref):
-        # align the panel to the bowtie2 human index and generate sorted bam file
+    def align_and_index(self, bt2_ref):
 
+        # align the panel to the bowtie2 human index and generate sorted bam file
+        # requirements: read mapped, mapq >= 30, primary alignment
         align_cmd = '/usr/local/bin/bowtie2-2.3.4.1-linux-x86_64/bowtie2 -x %s --mm --interleaved %s' \
                     ' --rg-id %s --rg SM:%s --rg PL:ILLUMINA --rg CN:UCSF --quiet' \
-                    ' | samtools view -b' \
+                    ' | samtools view -b -q 30 -F 4 -F 0X0100' \
                     ' | samtools sort -o %s' \
                     % (bt2_ref,
                        self.fastq,
                        self.cell_barcode,
                        self.cell_barcode,
                        self.bam)
+        subprocess.call(align_cmd, shell=True)
 
-        process = subprocess.Popen(align_cmd, shell=True)
-
-        return process
-
-    def index_bam(self):
         # index all bam files using samtools
-
         index_cmd = 'samtools index %s %s' \
                     % (self.bam,
                        self.bai)
-
-        process = subprocess.Popen(index_cmd, shell=True)
-
-        return process
+        subprocess.call(index_cmd, shell=True)
 
     def call_variants(self, fasta, interval_file, dbsnp_file):
         # call variants using gatk
@@ -319,12 +326,11 @@ class SingleCell(object):
                           interval_file,
                           dbsnp_file)
 
-        process = subprocess.Popen(variants_cmd, shell=True)
-
-        return process
+        # process = subprocess.Popen(variants_cmd, shell=True)
+        subprocess.call(variants_cmd, shell=True)
 
     @staticmethod
-    def combine_gvcfs(cells, id, fasta, interval_file, dbsnp_file, merged_gvcf_dir, genotyping_dir, multi_sample = False):
+    def combine_gvcfs(cells, id, fasta, interval_file, dbsnp_file, merged_gvcf_dir, genotyping_dir, multi_sample=False):
         # combine single-cell gvcfs
 
         gvcf_list = genotyping_dir + 'gvcfs.txt'
@@ -370,16 +376,12 @@ class SingleCell(object):
 
         return process
 
-def count_alignments(r1_files, amplicon_file, fasta_file, genome_index, tsv, dir):
+def count_alignments(r1_files, amplicon_file, fasta_file, tsv, dir):
     # align and count r1 reads for all barcodes, and save to tsv file
-
-    # extend amplicon coordinates by 2 bp on each end
-    slopped_intervals = dir + 'amplicons.slopped.bed'
-    subprocess.call('bedtools slop -i %s -g %s -b 2 > %s' % (amplicon_file, genome_index, slopped_intervals), shell=True)
 
     # get fasta file from human genome for this interval
     insert_fasta = dir + 'amplicons.fasta'
-    subprocess.call('bedtools getfasta -fi %s -bed %s -fo %s -name' % (fasta_file, slopped_intervals, insert_fasta), shell=True)
+    subprocess.call('bedtools getfasta -fi %s -bed %s -fo %s -name' % (fasta_file, amplicon_file, insert_fasta), shell=True)
 
     # build bt2 index for this fasta
     insert_bt2 = dir + 'inserts'
@@ -398,7 +400,7 @@ def count_alignments(r1_files, amplicon_file, fasta_file, genome_index, tsv, dir
 
     # align reads with bowtie2
     bt2_input = ' -U '.join(r1_files)
-    bt2_cmd = 'bowtie2 -p 64 -x %s -U %s' % (insert_bt2, bt2_input)
+    bt2_cmd = 'bowtie2 -p 24 -x %s -U %s' % (insert_bt2, bt2_input)
     bt2_align = subprocess.Popen(bt2_cmd, stdout=subprocess.PIPE, shell=True)
 
     # iterate through all reads
@@ -407,27 +409,34 @@ def count_alignments(r1_files, amplicon_file, fasta_file, genome_index, tsv, dir
         if line[0] == '@':  # ignore header lines
             continue
 
+        # parse sam records
         record = line.split('\t')
-
         flag = int(record[1])
         unmapped = int(bin(flag)[-3])  # mapping bit (1: not mapped; 0: mapped)
+        mapq = int(record[4])
 
         if flag >= 256:
             secondary = int(bin(flag)[-9])  # secondary bit (1: non-primary; 0: primary)
         else:
             secondary = 0
 
-        query_name = record[0]
-        cell_barcode = query_name.split('_')[1]
-        reference_name = record[2]
-
-        # check read is mapped
+        # discard unmapped reads
         if unmapped == 1:
             continue
 
-        # skip all secondary alignments
+        # discard secondary alignments
         if secondary == 1:
             continue
+
+        # discard reads with low mapping quality
+        min_mapq = 30
+        if mapq < min_mapq:
+            continue
+
+        # if read passes all filters, extract barcode
+        query_name = record[0]
+        cell_barcode = query_name.split('_')[1]
+        reference_name = record[2]
 
         # save alignment to dict
         try:
@@ -714,6 +723,67 @@ def count_umis(ab_reads_file, umi_counts_file, n_procs=24):
             f.write('\t'.join([str(counts_by_method[group][m]) for m in count_methods]) + '\n')
 
     print 'All UMIs grouped and saved to %s.\n' % umi_counts_file
+
+def vcf_to_tables(vcf_file, genotype_file, variants_tsv):
+    # parses a vcf file into a series of tables
+
+    # load vcf file into numpy array
+    # include annotation info from snpeff
+    vcf = allel.read_vcf(vcf_file,
+                         transformers=allel.ANNTransformer(),
+                         fields=['variants/CHROM',
+                                 'variants/POS',
+                                 'variants/REF',
+                                 'variants/ALT',
+                                 'calldata/GT',
+                                 'calldata/AD',
+                                 'calldata/GQ',
+                                 'calldata/DP',
+                                 'samples',
+                                 'ANN'])
+    # layers to extract:
+    # GT: genotype (0: WT, 1: HET, 2: HOM, 3: no call)
+    # DP: total read depth
+    # GQ: genotype quality
+    # AD: alt allele depth
+    # RD: ref allele depth
+
+    GT = np.sum(vcf['calldata/GT'], axis=2)
+    GT[GT == -2] = 3
+    DP = np.stack(vcf['calldata/DP'], axis=0)
+    GQ = np.stack(vcf['calldata/GQ'], axis=0)
+    AD = np.stack(vcf['calldata/AD'][:, :, 1], axis=0)
+    RD = np.stack(vcf['calldata/AD'][:, :, 0], axis=0)
+
+    # create variant names
+    names = [vcf['variants/ANN_Gene_Name'][i] +
+             ':' + vcf['variants/CHROM'][i] +
+             ':' + str(vcf['variants/POS'][i]) +
+             ':' + vcf['variants/REF'][i] +
+             '/' + vcf['variants/ALT'][:, 0][i]
+             for i in range((vcf['variants/REF'].shape[0]))]
+
+    # assemble and save variant annotations to file
+    ANN_columns = [c for c in list(vcf) if '/ANN' in c]
+    variants_table = pd.DataFrame(data=names, columns=['Name'])
+    for ann in ANN_columns:
+        variants_table[ann.split('ANN_')[1]] = vcf[ann]
+    variants_table.to_csv(path_or_buf=variants_tsv, sep='\t', index=False)
+
+    # encode variant names and cell barcodes
+    names = [n.encode('utf8') for n in names]
+    barcodes = [b.encode('utf8') for b in vcf['samples']]
+
+    # save genotyping information to compressed hdf5 file
+    with h5py.File(genotype_file, 'w') as f:
+        f.create_dataset('GT', data=GT, dtype='i1', compression='gzip')
+        f.create_dataset('GQ', data=GQ, dtype='i1', compression='gzip')
+        f.create_dataset('DP', data=DP, dtype='i2', compression='gzip')
+        f.create_dataset('AD', data=AD, dtype='i2', compression='gzip')
+        f.create_dataset('RD', data=RD, dtype='i2', compression='gzip')
+        f.create_dataset('VARIANTS', data=names, compression='gzip')
+        f.create_dataset('CELL_BARCODES', data=barcodes, compression='gzip')
+
 
 
 
