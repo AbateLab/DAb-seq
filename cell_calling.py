@@ -28,7 +28,7 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     # set parameters for coverage minimums (applied when threshold is True)
 
     # minimum coverage for an interval
-    min_coverage = 8
+    min_coverage = 10
 
     # minimum fraction of intervals with min_coverage
     min_fraction = 0.6
@@ -41,6 +41,9 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     barcodes = list(all_df.index)
     reads_per_cell = [int(i) for i in list(all_df.sum(axis=1))]
     reads_per_cell, barcodes = (list(t) for t in zip(*sorted(zip(reads_per_cell, barcodes), reverse=True)))
+
+    # available cell calling methods
+    calling_methods = ['second_derivative', 'simple_minimum']
 
     if method == 'second_derivative':
         # this method uses the second derivative (inflection point) of the knee plot to identify cells
@@ -70,20 +73,31 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
 
         # smooth the data by filtering and call first peak
         yhat = savgol_filter(bin_means, 151, 3)  # window size, polynomial order
-        first_peak = find_peaks(yhat, prominence=0.1)[0][0]
 
-        # first n cell barcodes are valid
-        n_cells = int(bin_centers[first_peak])
-        cell_barcodes = barcodes[:n_cells]
+        # prominence of peak (0.1 should be adequate for most mammalian cell panels)
+        prominence = 0.1
 
-    elif method == 'simple_minimum':
+        try:
+            peaks = find_peaks(yhat, prominence=prominence)
+            max_peak_i = np.argmax(peaks[1]['prominences'])
+            max_peak = peaks[0][max_peak_i]
+
+            # first n cell barcodes are valid
+            n_cells = int(bin_centers[max_peak])
+            cell_barcodes = barcodes[:n_cells]
+
+        except ValueError:
+            # if no peaks found, fall back on using simple minimum
+            method = 'simple_minimum'
+
+    if method == 'simple_minimum':
         # this method uses a simple minimum to call cells
 
         num_targets = len(all_df.columns) - 1
         min_reads_per_cell = min_coverage * min_fraction * num_targets
-        cell_barcodes = [b for b in barcodes if barcodes[b] >= min_reads_per_cell]
+        cell_barcodes = [barcodes[i] for i in range(len(barcodes)) if reads_per_cell[i] >= min_reads_per_cell]
 
-    else:
+    if method not in calling_methods:
         print 'Invalid method selected. Exiting...'
         raise SystemExit
 
@@ -91,8 +105,8 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     if threshold:
         valid_cells = []
         for c in cell_barcodes:
-            amplicon_counts = list(all_df.loc[c, : ])
-            if len([i for i in range(len(amplicon_counts)) if amplicon_counts[i] >= min_coverage])\
+            amplicon_counts = list(all_df.loc[c, :])
+            if len([i for i in range(len(amplicon_counts)) if amplicon_counts[i] >= min_coverage]) \
                     / len(amplicon_counts) >= min_fraction:
                 valid_cells.append(c)
 
@@ -108,12 +122,18 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     kneeplot_path = output_folder + experiment_name + '.kneeplot.png'
     boxplot_path = output_folder + experiment_name + '.amplicon_boxplot.png'
 
-    knee_plot(all_df, cell_df, kneeplot_path)
+    # if simple threshold was used, indicate on the plot
+    if method == 'simple_minimum':
+        note = 'SIMPLE MINIMUM MODE ON'
+    else:
+        note = ''
+
+    knee_plot(all_df, cell_df, kneeplot_path, note)
     amplicon_boxplot(cell_df, boxplot_path)
 
     return valid_cells
 
-def knee_plot(all_df, cell_df, output_file):
+def knee_plot(all_df, cell_df, output_file, note=''):
     # generate knee plot with auc colored according to cell association
 
     reads_per_cell = [int(i) for i in list(all_df.sum(axis=1))]
@@ -146,6 +166,7 @@ def knee_plot(all_df, cell_df, output_file):
                      color='grey', alpha=0.2, label='Non-Cell Reads')
     plt.legend(loc='upper right')
 
+    plt.title(note)
     plt.tight_layout()
     plt.savefig(output_file, dpi=300)
 
@@ -168,11 +189,3 @@ def amplicon_boxplot(cell_df, output_file):
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300)
-
-
-
-
-
-
-
-
