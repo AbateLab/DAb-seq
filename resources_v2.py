@@ -319,7 +319,7 @@ class SingleCell(object):
         # call variants using gatk
 
         variants_cmd = 'gatk HaplotypeCaller -R %s -I %s -O %s -ERC BP_RESOLUTION -L %s -D %s --verbosity ERROR' \
-                        ' --native-pair-hmm-threads 1' \
+                        ' --native-pair-hmm-threads 1 --max-reads-per-alignment-start 0' \
                        % (fasta,
                           self.bam,
                           self.vcf,
@@ -724,6 +724,22 @@ def count_umis(ab_reads_file, umi_counts_file, n_procs=24):
 
     print 'All UMIs grouped and saved to %s.\n' % umi_counts_file
 
+def bcftools_annotate(annotations_vcf, input_vcf, column_info, output_vcf):
+    # uses bcftools to annotate a vcf file with annotation information from another
+    # input and output vcf should both be uncompressed vcf
+
+    # bgzip and index the input vcf
+    subprocess.call('bgzip -@ 16 %s' % input_vcf, shell=True)
+    subprocess.call('tabix %s' % input_vcf + '.gz', shell=True)
+
+    # use bcftools to annotate the input
+    bcf_cmd = 'bcftools annotate -a %s %s %s > %s' % (annotations_vcf,
+                                                      column_info,
+                                                      input_vcf + '.gz',
+                                                      output_vcf)
+    subprocess.call(bcf_cmd, shell=True)
+
+
 def vcf_to_tables(vcf_file, genotype_file, variants_tsv):
     # parses a vcf file into a series of tables
 
@@ -731,10 +747,7 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv):
     # include annotation info from snpeff
     vcf = allel.read_vcf(vcf_file,
                          transformers=allel.ANNTransformer(),
-                         fields=['variants/CHROM',
-                                 'variants/POS',
-                                 'variants/REF',
-                                 'variants/ALT',
+                         fields=['variants/*',
                                  'calldata/GT',
                                  'calldata/AD',
                                  'calldata/GQ',
@@ -764,10 +777,21 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv):
              for i in range((vcf['variants/REF'].shape[0]))]
 
     # assemble and save variant annotations to file
-    ANN_columns = [c for c in list(vcf) if '/ANN' in c]
     variants_table = pd.DataFrame(data=names, columns=['Name'])
+
+    # cosmic id
+    variants_table['COSMIC_ID'] = vcf['variants/ID']
+
+    # snpeff columns
+    ANN_columns = [c for c in list(vcf) if '/ANN' in c]
     for ann in ANN_columns:
-        variants_table[ann.split('ANN_')[1]] = vcf[ann]
+        variants_table['SnpEff_' + ann.split('/ANN_')[1]] = vcf[ann]
+
+    # clinvar columns
+    CLN_columns = [c for c in list(vcf) if '/CLN' in c]
+    for cln in CLN_columns:
+        variants_table['ClinVar_' + cln.split('/')[1]] = vcf[cln]
+
     variants_table.to_csv(path_or_buf=variants_tsv, sep='\t', index=False)
 
     # encode variant names and cell barcodes
@@ -783,8 +807,6 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv):
         f.create_dataset('RD', data=RD, dtype='i2', compression='gzip')
         f.create_dataset('VARIANTS', data=names, compression='gzip')
         f.create_dataset('CELL_BARCODES', data=barcodes, compression='gzip')
-
-
 
 
 

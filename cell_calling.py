@@ -28,7 +28,7 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     # set parameters for coverage minimums (applied when threshold is True)
 
     # minimum coverage for an interval
-    min_coverage = 10
+    min_coverage = 8
 
     # minimum fraction of intervals with min_coverage
     min_fraction = 0.6

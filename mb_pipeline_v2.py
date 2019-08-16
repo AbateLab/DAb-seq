@@ -160,7 +160,7 @@ if __name__ == "__main__":
     -bcftools
     -cutadapt
     -bbmap
-    -snpEff
+    -snpeff
     
     ''', formatter_class=argparse.RawTextHelpFormatter)
 
@@ -459,6 +459,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 '''
 
     # check that all barcodes have the same length
+    # this ensures demultiplexing will work correctly
     bar_length = list(set([len(k) for k in valid_cells]))
     assert len(bar_length) == 1, 'All barcodes must have the same length!'
 
@@ -510,7 +511,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 '''
 
     # limit number of cells to call variants at a time (this is hardware-limited)
-    n_call_variants = 50
+    n_call_variants = 70
 
     # create pool of workers and run through all samples
     call_variants_pool = ThreadPool(processes=n_call_variants)
@@ -532,7 +533,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 
     # combine gvcfs in chunks (hardware-limited)
     # size of chunks for gvcf merger batching (based on hardware limitations)
-    samples_per_chunk = 100
+    samples_per_chunk = 150
     cells_processed = 0
 
     # split cell list into chunks
@@ -587,7 +588,7 @@ Step 6: write valid cells from panel reads to separate fastq files
     genotype_gvcfs = [resources_v2.SingleCell.genotype_gvcfs(human_fasta_file,
                                                              dbsnp_file,
                                                              merged_gvcf,
-                                                             geno_gvcf)]
+                                                             geno_vcf)]
 
     # wait for all processes to finish before continuing
     wait(genotype_gvcfs)
@@ -597,14 +598,22 @@ Step 6: write valid cells from panel reads to separate fastq files
 # Step 11: split multiallelic sites and annotate vcf
 ####################################################################################
 '''
-    # split multiallelic sites into multiple lines
-    split_cmd = 'bcftools norm -m - %s -o %s' % (geno_gvcf, split_gvcf)
+    # split and normalize variants
+    split_cmd = 'bcftools norm --threads 16 -f %s -m - %s > %s' % (human_fasta_file, geno_vcf, split_vcf)
     subprocess.call(split_cmd, shell=True)
 
-    # annotate vcf with snpeff
-    annotate_cmd = 'snpEff ann -v -stats %s -c %s hg19 %s > %s' % (snpeff_summary, snpeff_config, split_gvcf, annot_gvcf)
+    # annotate vcf with snpeff (functional)
+    annotate_cmd = 'snpEff ann -v -stats %s -c %s hg19 %s > %s' % (snpeff_summary,
+                                                                   snpeff_config,
+                                                                   split_vcf,
+                                                                   snpeff_annot_vcf)
     subprocess.call(annotate_cmd, shell=True)
 
+    # annotate with bcftools
+    # use clinvar and cosmic databases
+    temp_vcf = snpeff_annot_vcf[:-4] + '.temp.vcf'
+    resources_v2.bcftools_annotate(clinvar_vcf, snpeff_annot_vcf, '-c INFO', temp_vcf)
+    resources_v2.bcftools_annotate(cosmic_vcf, temp_vcf, '-c ID', annot_vcf)
 
     print '''
 ####################################################################################
@@ -613,7 +622,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 '''
 
     # parse vcf and save to tables
-    resources_v2.vcf_to_tables(annot_gvcf, geno_hdf5, variants_tsv)
+    resources_v2.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
 
     print '''
 ####################################################################################

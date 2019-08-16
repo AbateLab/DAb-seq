@@ -19,11 +19,11 @@ if __name__ == "__main__":
 
     config_file = '/drive3/dabseq/output/dabseq_13-19.cfg'
 
-    sample_basenames = ['abseq' + str(i) for i in range(13, 20)]
+    sample_basenames = ['abseq' + str(i) for i in range(14, 20)]
 
     # number of samples to process in parallel at a time
     # limit to 2 for dabseq samples on greyhound
-    n_parallel = 2
+    n_parallel = 3
 
     # cap number of concurrent jobs to total number of samples
     if n_parallel > len(sample_basenames):
