@@ -103,26 +103,44 @@ def generate_samples(R1_files, R2_files):
         # assign filenames to sample types
         # note: using alphabetization pattern which may not exist in future
 
-        ab_r1 = R1_files[i]
-        ab_r2 = R2_files[i]
-        panel_r1 = R1_files[i + len(R1_files) / 2]
-        panel_r2 = R2_files[i + len(R1_files) / 2]
-
         sample_num = i + 1
         sample_name = sample_basename + '-' + str(sample_num)
+
+        panel_r1 = R1_files[i + len(R1_files) / 2]
+        panel_r2 = R2_files[i + len(R1_files) / 2]
 
         # set file locations and append to sample object
 
         panel_r1_temp = temp_dir + panel_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
         panel_r2_temp = temp_dir + panel_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
 
-        ab_r1_temp = temp_dir + ab_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
-        ab_r2_temp = temp_dir + ab_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
-
         panel_barcodes = barcode_dir + sample_name + '_barcodes_panel.json'
-        ab_barcodes = barcode_dir + sample_name + '_barcodes_abs.json'
 
-        ab_reads = ab_dir + sample_name + '_ab_reads.tsv'
+        # for pipelines including antibody data
+        if not dna_only:
+            ab_r1 = R1_files[i]
+            ab_r2 = R2_files[i]
+
+            ab_r1_temp = temp_dir + ab_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+            ab_r2_temp = temp_dir + ab_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+
+            ab_barcodes = barcode_dir + sample_name + '_barcodes_abs.json'
+
+            ab_reads = ab_dir + sample_name + '_ab_reads.tsv'
+
+        # for dna-only pipelines
+        else:
+            ab_r1 = ''
+            ab_r2 = ''
+
+            ab_r1_temp = ''
+            ab_r2_temp = ''
+
+            ab_barcodes = ''
+
+            ab_reads = ''
+
+
 
         samples.append(resources_v2.TapestriSample(sample_num,
                                                    panel_r1,
@@ -166,11 +184,13 @@ if __name__ == "__main__":
 
     parser.add_argument('sample_name', type=str, help='sample basename')
     parser.add_argument('cfg_file', type=str, help='config filename')
+    parser.add_argument('--dna-only', action='store_true', default=False, help='option to run dna panel pipeline only')
 
     args = parser.parse_args()  # parse arguments
 
     sample_basename = args.sample_name
     cfg_f = args.cfg_file
+    dna_only = args.dna_only
 
     print '''
     
@@ -212,8 +232,16 @@ Initializing pipeline...
     else:
         with open(cfg_f, 'r') as cfg:
             for line in cfg:
-                if line[0] == '[' or line[0] == '#' or line[0] == ' ':
+                if line[0] == '#' or line[0] == ' ':
                     continue
+                elif line[0] == '[':
+                    if 'Antibody' in line and dna_only:
+                        line = cfg.next()
+                        while line[0] != '[':
+                            try:
+                                line = cfg.next()
+                            except StopIteration:
+                                break
                 else:
                     var = line.split("#", 1)[0].strip()  # to remove inline comments
                     exec(var)
@@ -251,13 +279,14 @@ Initializing pipeline...
         print 'FASTQ input directory (%s) is empty! Exiting...\n' % panel_fastq_dir
         raise SystemExit
 
-    if not os.path.exists(ab_fastq_dir):
-        print 'FASTQ input directory (%s) does not exist! Exiting...\n' % ab_fastq_dir
-        raise SystemExit
+    if not dna_only:
+        if not os.path.exists(ab_fastq_dir):
+            print 'FASTQ input directory (%s) does not exist! Exiting...\n' % ab_fastq_dir
+            raise SystemExit
 
-    elif os.listdir(ab_fastq_dir) == []:
-        print 'FASTQ input directory (%s) is empty! Exiting...\n' % ab_fastq_dir
-        raise SystemExit
+        elif os.listdir(ab_fastq_dir) == []:
+            print 'FASTQ input directory (%s) is empty! Exiting...\n' % ab_fastq_dir
+            raise SystemExit
 
     # create all other directories for this run
     # if it already exists, ignore and continue
@@ -279,13 +308,16 @@ Initializing pipeline...
 ####################################################################################
     '''
 
-    # get all fastq filenames
-    R1_files_panel, R2_files_panel = get_fastq_names(panel_fastq_dir)
-    R1_files_ab, R2_files_ab = get_fastq_names(ab_fastq_dir)
+    # get fastq files for dna panel
+    R1_files, R2_files = get_fastq_names(panel_fastq_dir)
 
-    # combine panel and ab fastq files
-    R1_files = R1_files_panel + R1_files_ab
-    R2_files = R2_files_panel + R2_files_ab
+    if not dna_only:
+
+        # get fastq files for antibodies
+        R1_files_ab, R2_files_ab = get_fastq_names(ab_fastq_dir)
+
+        R1_files += R1_files_ab
+        R2_files += R2_files_ab
 
     R1_files.sort()
     R2_files.sort()
@@ -329,16 +361,17 @@ Initializing pipeline...
         process_barcodes.append(p)
         p.start()
 
-        # ab files
-        p = Process(
-            target=sample.filter_valid_reads,
-            args=(r1_start,
-                  barcodes,
-                  bar_ind_1,
-                  bar_ind_2,
-                  'ab'))
-        process_barcodes.append(p)
-        p.start()
+        if not dna_only:
+            # ab files
+            p = Process(
+                target=sample.filter_valid_reads,
+                args=(r1_start,
+                      barcodes,
+                      bar_ind_1,
+                      bar_ind_2,
+                      'ab'))
+            process_barcodes.append(p)
+            p.start()
 
     # wait for processes to finish
     for p in process_barcodes:
@@ -361,17 +394,18 @@ Initializing pipeline...
         cut_adapters.append(p)
         p.start()
 
-        # ab files
-        p = Process(
-            target=sample.barcode_reads,
-            args=(r1_start,
-                  r1_end,
-                  r2_end,
-                  r1_min_len_ab,
-                  r2_min_len_ab,
-                  'ab'))
-        cut_adapters.append(p)
-        p.start()
+        if not dna_only:
+            # ab files
+            p = Process(
+                target=sample.barcode_reads,
+                args=(r1_start,
+                      r1_end,
+                      r2_end,
+                      r1_min_len_ab,
+                      r2_min_len_ab,
+                      'ab'))
+            cut_adapters.append(p)
+            p.start()
 
     # wait for processes to finish
     for p in cut_adapters:
@@ -383,45 +417,47 @@ Initializing pipeline...
 # ###################################################################################
 '''
 
-    # load ab barcode csv file (with descriptions)
-    barcodes = resources_v2.load_barcodes(ab_barcode_csv_file, 1, False)
-    barcode_descriptions = copy.deepcopy(barcodes)
+    if not dna_only:
 
-    # generate hamming dictionary for error correction
-    barcodes = resources_v2.generate_hamming_dict(barcodes)
+        # load ab barcode csv file (with descriptions)
+        barcodes = resources_v2.load_barcodes(ab_barcode_csv_file, 1, False)
+        barcode_descriptions = copy.deepcopy(barcodes)
 
-    # process ab reads and look for barcode
-    ab_process = []
-    for sample in samples:
-        # ab files
-        p = Process(
-            target=sample.process_abs,
-            args=(barcodes,
-                  barcode_descriptions,
-                  ab_handles,
-                  ab_bar_coord,
-                  ab_umi_coord,
-                  min_umi_qual))
-        ab_process.append(p)
-        p.start()
+        # generate hamming dictionary for error correction
+        barcodes = resources_v2.generate_hamming_dict(barcodes)
 
-    # wait for processes to finish
-    for p in ab_process:
-        p.join()
+        # process ab reads and look for barcode
+        ab_process = []
+        for sample in samples:
+            # ab files
+            p = Process(
+                target=sample.process_abs,
+                args=(barcodes,
+                      barcode_descriptions,
+                      ab_handles,
+                      ab_bar_coord,
+                      ab_umi_coord,
+                      min_umi_qual))
+            ab_process.append(p)
+            p.start()
 
-    # merge ab reads files into a single file and remove old files
-    ab_files = [s.ab_reads for s in samples]
+        # wait for processes to finish
+        for p in ab_process:
+            p.join()
 
-    # concatenate files and remove old ones
-    wait([subprocess.Popen('cat %s > %s' % (' '.join(ab_files), ab_reads_merged), shell=True)])
-    for f in ab_files:
-        try:
-            os.remove(f)
-        except OSError:
-            pass
+        # merge ab reads files into a single file and remove old files
+        ab_files = [s.ab_reads for s in samples]
 
-    # count the ab read umis
-    resources_v2.count_umis(ab_reads_merged, umi_counts_merged)
+        # concatenate files and remove old ones
+        wait([subprocess.Popen('cat %s > %s' % (' '.join(ab_files), ab_reads_merged), shell=True)])
+        for f in ab_files:
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+        # count the ab read umis
+        resources_v2.count_umis(ab_reads_merged, umi_counts_merged)
 
     print '''
 ###################################################################################
@@ -491,7 +527,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 ####################################################################################
 '''
 
-    # limit number of cells to preprocess at a time (this is hardware-limited)
+    # limit number of cells to preprocess at a time (based on hardware limitations)
     n_preprocess = 300
 
     # create pool of workers and run through all samples
@@ -510,7 +546,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 ####################################################################################
 '''
 
-    # limit number of cells to call variants at a time (this is hardware-limited)
+    # limit number of cells to call variants at a time (based on hardware limitations)
     n_call_variants = 70
 
     # create pool of workers and run through all samples
@@ -531,7 +567,7 @@ Step 6: write valid cells from panel reads to separate fastq files
 ####################################################################################
 '''
 
-    # combine gvcfs in chunks (hardware-limited)
+    # combine gvcfs in chunks
     # size of chunks for gvcf merger batching (based on hardware limitations)
     samples_per_chunk = 150
     cells_processed = 0
