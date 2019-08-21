@@ -366,7 +366,7 @@ class SingleCell(object):
 
         genotype_cmd = 'gatk GenotypeGVCFs -R %s -V %s -O %s -D %s' \
                        ' --standard-min-confidence-threshold-for-calling 30' \
-                       ' --max-alternate-alleles 2' \
+                       ' --max-alternate-alleles 2 --includeNonVariantSites' \
                        % (fasta,
                           merged_gvcf_file,
                           geno_gvcf_file,
