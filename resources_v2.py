@@ -1,11 +1,12 @@
-# -*- coding: utf-8 -*-
 """
-mission bio single-cell pipeline code
-written by ben 11.25.2018
+
+dab-seq: single-cell dna genotyping and antibody sequencing
+ben demaree 7.9.2019
+
+functions required for the processing pipeline
 
 """
 
-# modules
 from __future__ import division
 import os
 import os.path
@@ -297,10 +298,10 @@ class SingleCell(object):
     def align_and_index(self, bt2_ref):
 
         # align the panel to the bowtie2 human index and generate sorted bam file
-        # requirements: read mapped, mapq >= 30, primary alignment
+        # read filters: read mapped, mapq >= 3, primary alignment
         align_cmd = '/usr/local/bin/bowtie2-2.3.4.1-linux-x86_64/bowtie2 -x %s --mm --interleaved %s' \
                     ' --rg-id %s --rg SM:%s --rg PL:ILLUMINA --rg CN:UCSF --quiet' \
-                    ' | samtools view -b -q 30 -F 4 -F 0X0100' \
+                    ' | samtools view -b -q 3 -F 4 -F 0X0100' \
                     ' | samtools sort -o %s' \
                     % (bt2_ref,
                        self.fastq,
@@ -315,22 +316,27 @@ class SingleCell(object):
                        self.bai)
         subprocess.call(index_cmd, shell=True)
 
-    def call_variants(self, fasta, interval_file, dbsnp_file):
+    def call_variants(self, fasta, interval_file):
         # call variants using gatk
 
-        variants_cmd = 'gatk HaplotypeCaller -R %s -I %s -O %s -ERC BP_RESOLUTION -L %s -D %s --verbosity ERROR' \
-                        ' --native-pair-hmm-threads 1 --max-reads-per-alignment-start 0' \
+        variants_cmd = 'gatk HaplotypeCaller -R %s -I %s -O %s -L %s ' \
+                       '--emit-ref-confidence GVCF ' \
+                       '--verbosity ERROR ' \
+                       '--native-pair-hmm-threads 1 ' \
+                       '--max-alternate-alleles 2 ' \
+                       '--standard-min-confidence-threshold-for-calling 0 ' \
+                       '--max-reads-per-alignment-start 0 ' \
+                       '--minimum-mapping-quality 3' \
                        % (fasta,
                           self.bam,
                           self.vcf,
-                          interval_file,
-                          dbsnp_file)
+                          interval_file)
 
         # process = subprocess.Popen(variants_cmd, shell=True)
         subprocess.call(variants_cmd, shell=True)
 
     @staticmethod
-    def combine_gvcfs(cells, id, fasta, interval_file, dbsnp_file, merged_gvcf_dir, genotyping_dir, multi_sample=False):
+    def combine_gvcfs(cells, id, fasta, interval_file, merged_gvcf_dir, genotyping_dir, multi_sample=False):
         # combine single-cell gvcfs
 
         gvcf_list = genotyping_dir + 'gvcfs.txt'
@@ -344,33 +350,32 @@ class SingleCell(object):
 
         # if cells is a SingleCell instance
         else:
-            out_file = merged_gvcf_dir + str(id) + '_merged.g.vcf'
+            out_file = merged_gvcf_dir + str(id) + '.merged.g.vcf'
             with open(genotyping_dir + 'gvcfs.txt', 'w') as f:
                 for c in cells:
                     f.write('--variant ' + c.vcf + '\n')
 
-        combine_cmd = 'gatk CombineGVCFs -R %s --arguments_file %s -O %s -L %s -D %s' \
+        combine_cmd = 'gatk CombineGVCFs -R %s --arguments_file %s -O %s -L %s' \
                        % (fasta,
                           gvcf_list,
                           out_file,
-                          interval_file,
-                          dbsnp_file)
+                          interval_file)
 
         process = subprocess.Popen(combine_cmd, shell=True)
 
         return process
 
     @staticmethod
-    def genotype_gvcfs(fasta, dbsnp_file, merged_gvcf_file, geno_gvcf_file):
+    def genotype_gvcfs(fasta, dbsnp_file, merged_gvcf_file, geno_gvcf_file, interval_file):
         # genotype the multisample merged gvcf file
 
-        genotype_cmd = 'gatk GenotypeGVCFs -R %s -V %s -O %s -D %s' \
-                       ' --standard-min-confidence-threshold-for-calling 30' \
-                       ' --max-alternate-alleles 2 --includeNonVariantSites' \
+        genotype_cmd = 'gatk GenotypeGVCFs -R %s -V %s -O %s -D %s -L %s ' \
+                       '--include-non-variant-sites' \
                        % (fasta,
                           merged_gvcf_file,
                           geno_gvcf_file,
-                          dbsnp_file)
+                          dbsnp_file,
+                          interval_file)
 
         process = subprocess.Popen(genotype_cmd, shell=True)
 
@@ -378,6 +383,9 @@ class SingleCell(object):
 
 def count_alignments(r1_files, amplicon_file, fasta_file, tsv, dir):
     # align and count r1 reads for all barcodes, and save to tsv file
+
+    # set minimum quality for counting read
+    min_mapq = 3
 
     # get fasta file from human genome for this interval
     insert_fasta = dir + 'amplicons.fasta'
@@ -400,40 +408,42 @@ def count_alignments(r1_files, amplicon_file, fasta_file, tsv, dir):
 
     # align reads with bowtie2
     bt2_input = ' -U '.join(r1_files)
-    bt2_cmd = 'bowtie2 -p 24 -x %s -U %s' % (insert_bt2, bt2_input)
+    # read filters: read mapped, mapq >= 3, primary alignment
+    # this filter is the same as used for single-cell mapping
+    bt2_cmd = 'bowtie2 -p 24 -x %s -U %s | samtools view -q 3 -F 4 -F 0X0100' % (insert_bt2, bt2_input)
     bt2_align = subprocess.Popen(bt2_cmd, stdout=subprocess.PIPE, shell=True)
 
     # iterate through all reads
     for line in bt2_align.stdout:
 
-        if line[0] == '@':  # ignore header lines
-            continue
-
-        # parse sam records
-        record = line.split('\t')
-        flag = int(record[1])
-        unmapped = int(bin(flag)[-3])  # mapping bit (1: not mapped; 0: mapped)
-        mapq = int(record[4])
-
-        if flag >= 256:
-            secondary = int(bin(flag)[-9])  # secondary bit (1: non-primary; 0: primary)
-        else:
-            secondary = 0
-
-        # discard unmapped reads
-        if unmapped == 1:
-            continue
-
-        # discard secondary alignments
-        if secondary == 1:
-            continue
-
-        # discard reads with low mapping quality
-        min_mapq = 30
-        if mapq < min_mapq:
-            continue
+        # if line[0] == '@':  # ignore header lines
+        #     continue
+        #
+        # # parse sam records
+        # record = line.split('\t')
+        # flag = int(record[1])
+        # unmapped = int(bin(flag)[-3])  # mapping bit (1: not mapped; 0: mapped)
+        # mapq = int(record[4])
+        #
+        # if flag >= 256:
+        #     secondary = int(bin(flag)[-9])  # secondary bit (1: non-primary; 0: primary)
+        # else:
+        #     secondary = 0
+        #
+        # # discard unmapped reads
+        # if unmapped == 1:
+        #     continue
+        #
+        # # discard secondary alignments
+        # if secondary == 1:
+        #     continue
+        #
+        # # discard reads with low mapping quality
+        # if mapq < min_mapq:
+        #     continue
 
         # if read passes all filters, extract barcode
+        record = line.split('\t')
         query_name = record[0]
         cell_barcode = query_name.split('_')[1]
         reference_name = record[2]
@@ -724,13 +734,31 @@ def count_umis(ab_reads_file, umi_counts_file, n_procs=24):
 
     print 'All UMIs grouped and saved to %s.\n' % umi_counts_file
 
+def left_align_trim(human_fasta_file, geno_vcf, split_vcf):
+    # uses bcftools to split multiallelics, left-align, and trim
+
+    # split and left-align variants
+    split_cmd = 'bcftools norm --threads 16 -f %s --check-ref w -m - %s > %s' %\
+                (human_fasta_file, geno_vcf, split_vcf)
+
+    subprocess.call(split_cmd, shell=True)
+
+def snpeff_annotate(snpeff_summary, snpeff_config, split_vcf, snpeff_annot_vcf):
+    # annotate a vcf file with snpeff functional predictions
+
+    annotate_cmd = 'snpEff ann -v -stats %s -c %s hg19 %s > %s' % (snpeff_summary,
+                                                                   snpeff_config,
+                                                                   split_vcf,
+                                                                   snpeff_annot_vcf)
+    subprocess.call(annotate_cmd, shell=True)
+
 def bcftools_annotate(annotations_vcf, input_vcf, column_info, output_vcf):
     # uses bcftools to annotate a vcf file with annotation information from another
     # input and output vcf should both be uncompressed vcf
 
     # bgzip and index the input vcf
-    subprocess.call('bgzip -@ 16 %s' % input_vcf, shell=True)
-    subprocess.call('tabix %s' % input_vcf + '.gz', shell=True)
+    subprocess.call('bgzip -f -@ 16 %s' % input_vcf, shell=True)
+    subprocess.call('tabix -f %s' % input_vcf + '.gz', shell=True)
 
     # use bcftools to annotate the input
     bcf_cmd = 'bcftools annotate -a %s %s %s > %s' % (annotations_vcf,
@@ -807,10 +835,3 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv):
         f.create_dataset('RD', data=RD, dtype='i2', compression='gzip')
         f.create_dataset('VARIANTS', data=names, compression='gzip')
         f.create_dataset('CELL_BARCODES', data=barcodes, compression='gzip')
-
-
-
-
-
-
-
