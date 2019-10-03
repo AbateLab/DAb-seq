@@ -3,8 +3,7 @@
 dab-seq: single-cell dna genotyping and antibody sequencing
 ben demaree 7.9.2019
 
-umis counted using methods described in Genome Research paper by Smith et al:
-https://genome.cshlp.org/content/early/2017/01/18/gr.209601.116
+the main script for pipeline execution
 
 '''
 
@@ -14,8 +13,8 @@ import argparse
 import copy
 from slackclient import SlackClient
 import time
-from multiprocessing import Process
 from multiprocessing.pool import ThreadPool
+from multiprocessing import Process, Queue
 import shutil
 
 # import functions from external files
@@ -99,37 +98,29 @@ def generate_samples(R1_files, R2_files):
 
     samples = []        # list of sample objects
 
-    for i in range(0, len(R1_files) / 2):
-        # assign filenames to sample types
-        # note: using alphabetization pattern which may not exist in future
+    # for experiments with only DNA panels
+    if dna_only:
+        for i in range(0, len(R1_files)):
+            # assign filenames to sample types
+            # note: using alphabetization pattern which may not exist in future
 
-        sample_num = i + 1
-        sample_name = sample_basename + '-' + str(sample_num)
+            sample_num = i + 1
+            sample_name = sample_basename + '-' + str(sample_num)
 
-        panel_r1 = R1_files[i + len(R1_files) / 2]
-        panel_r2 = R2_files[i + len(R1_files) / 2]
+            # dna panel
 
-        # set file locations and append to sample object
+            panel_r1 = R1_files[i]
+            panel_r2 = R2_files[i]
 
-        panel_r1_temp = temp_dir + panel_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
-        panel_r2_temp = temp_dir + panel_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+            # set file locations and append to sample object
 
-        panel_barcodes = barcode_dir + sample_name + '_barcodes_panel.json'
+            panel_r1_temp = temp_dir + panel_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+            panel_r2_temp = temp_dir + panel_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
 
-        # for pipelines including antibody data
-        if not dna_only:
-            ab_r1 = R1_files[i]
-            ab_r2 = R2_files[i]
+            panel_barcodes = barcode_dir + sample_name + '_barcodes_panel.json'
 
-            ab_r1_temp = temp_dir + ab_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
-            ab_r2_temp = temp_dir + ab_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+            # antibodies - set filenames to empty string
 
-            ab_barcodes = barcode_dir + sample_name + '_barcodes_abs.json'
-
-            ab_reads = ab_dir + sample_name + '_ab_reads.tsv'
-
-        # for dna-only pipelines
-        else:
             ab_r1 = ''
             ab_r2 = ''
 
@@ -140,20 +131,64 @@ def generate_samples(R1_files, R2_files):
 
             ab_reads = ''
 
+            samples.append(resources_v2.TapestriSample(sample_num,
+                                                       panel_r1,
+                                                       panel_r2,
+                                                       panel_r1_temp,
+                                                       panel_r2_temp,
+                                                       ab_r1,
+                                                       ab_r2,
+                                                       ab_r1_temp,
+                                                       ab_r2_temp,
+                                                       panel_barcodes,
+                                                       ab_barcodes,
+                                                       ab_reads))
 
+    # for experiments with antibody data
+    else:
+        for i in range(0, len(R1_files) / 2):
+            # assign filenames to sample types
+            # note: using alphabetization pattern which may not exist in future
 
-        samples.append(resources_v2.TapestriSample(sample_num,
-                                                   panel_r1,
-                                                   panel_r2,
-                                                   panel_r1_temp,
-                                                   panel_r2_temp,
-                                                   ab_r1,
-                                                   ab_r2,
-                                                   ab_r1_temp,
-                                                   ab_r2_temp,
-                                                   panel_barcodes,
-                                                   ab_barcodes,
-                                                   ab_reads))
+            sample_num = i + 1
+            sample_name = sample_basename + '-' + str(sample_num)
+
+            # dna panel
+
+            panel_r1 = R1_files[i + len(R1_files) / 2]
+            panel_r2 = R2_files[i + len(R1_files) / 2]
+
+            # set file locations and append to sample object
+
+            panel_r1_temp = temp_dir + panel_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+            panel_r2_temp = temp_dir + panel_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+
+            panel_barcodes = barcode_dir + sample_name + '_barcodes_panel.json'
+
+            # antibodies
+
+            ab_r1 = R1_files[i]
+            ab_r2 = R2_files[i]
+
+            ab_r1_temp = temp_dir + ab_r1.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+            ab_r2_temp = temp_dir + ab_r2.split('.fastq.gz')[0].split('/')[-1] + '_temp.fastq'
+
+            ab_barcodes = barcode_dir + sample_name + '_barcodes_abs.json'
+
+            ab_reads = ab_dir + sample_name + '_ab_reads.tsv'
+
+            samples.append(resources_v2.TapestriSample(sample_num,
+                                                       panel_r1,
+                                                       panel_r2,
+                                                       panel_r1_temp,
+                                                       panel_r2_temp,
+                                                       ab_r1,
+                                                       ab_r2,
+                                                       ab_r1_temp,
+                                                       ab_r2_temp,
+                                                       panel_barcodes,
+                                                       ab_barcodes,
+                                                       ab_reads))
 
     return samples
 
@@ -185,12 +220,14 @@ if __name__ == "__main__":
     parser.add_argument('sample_name', type=str, help='sample basename')
     parser.add_argument('cfg_file', type=str, help='config filename')
     parser.add_argument('--dna-only', action='store_true', default=False, help='option to run dna panel pipeline only')
+    parser.add_argument('--gvcf-only', action='store_true', default=False, help='option to stop pipeline after single-cell gvcf creation')
 
     args = parser.parse_args()  # parse arguments
 
     sample_basename = args.sample_name
     cfg_f = args.cfg_file
     dna_only = args.dna_only
+    gvcf_only = args.gvcf_only
 
     print '''
     
@@ -377,9 +414,10 @@ Initializing pipeline...
 
     # save a copy of the config file used for the run to the base output directory
     try:
+        os.remove(base_dir + cfg_f.split('/')[-1])
         shutil.copy(cfg_f, base_dir)
-    except shutil.Error:
-        pass
+    except OSError:
+        shutil.copy(cfg_f, base_dir)
 
     # check all files exist
     all_vars = copy.copy(globals())
@@ -439,6 +477,7 @@ Initializing pipeline...
     # get fastq files for dna panel
     R1_files, R2_files = get_fastq_names(panel_fastq_dir)
 
+    # if experiment includes antibody data
     if not dna_only:
 
         # get fastq files for antibodies
@@ -669,7 +708,6 @@ Step 6: write valid cells from panel reads to separate fastq files
     preprocess_pool.close()
     preprocess_pool.join()
 
-
     print '''
 ####################################################################################
 # Step 8: perform variant calling for all cells
@@ -685,116 +723,111 @@ Step 6: write valid cells from panel reads to separate fastq files
     for c in cells:
         call_variants_pool.apply_async(resources_v2.SingleCell.call_variants, args=(c,
                                                                                    human_fasta_file,
-                                                                                   interval_file,
-                                                                                   dbsnp_file,))
+                                                                                   interval_file,))
 
     call_variants_pool.close()
     call_variants_pool.join()
 
-    print '''
+    if not gvcf_only:
+
+        print '''
 ####################################################################################
 # Step 9: combine gvcf files
 ####################################################################################
 '''
 
-    # combine gvcfs in chunks
-    # size of chunks for gvcf merger batching (based on hardware limitations)
-    samples_per_chunk = 150
-    cells_processed = 0
+        #TODO port the entire genotyping pipeline to the genotype_cohort script
 
-    # split cell list into chunks
-    sample_chunks = [cells[i:i + samples_per_chunk] for i in xrange(0, len(cells), samples_per_chunk)]
-    chunk_number = 0
+        # combine gvcfs in chunks
+        # size of chunks for gvcf merger batching (based on hardware limitations)
+        samples_per_chunk = 150
+        cells_processed = 0
 
-    # first stage merger
-    for chunk in sample_chunks:
-        # combine gvcfs in batches
-        combine_gvcfs = [resources_v2.SingleCell.combine_gvcfs(chunk,
-                                                               chunk_number,
+        # split cell list into chunks
+        sample_chunks = [cells[i:i + samples_per_chunk] for i in xrange(0, len(cells), samples_per_chunk)]
+        chunk_number = 0
+
+        # first stage merger
+        for chunk in sample_chunks:
+            # combine gvcfs in batches
+            combine_gvcfs = [resources_v2.SingleCell.combine_gvcfs(chunk,
+                                                                   chunk_number,
+                                                                   human_fasta_file,
+                                                                   interval_file,
+                                                                   merged_gvcf_dir,
+                                                                   genotyping_dir)]
+
+            # wait for all processes to finish before continuing
+            wait(combine_gvcfs)
+
+            chunk_number += 1
+            cells_processed += samples_per_chunk
+
+            print '\n%d of %d gvcfs combined (first stage).\n' % (cells_processed, len(cells))
+
+        # second stage merger
+        # find gvcf files from first merger stage
+
+        gvcfs_to_merge = [merged_gvcf_dir + f for f in os.listdir(merged_gvcf_dir) if f.split('.')[-1] == 'vcf']
+
+        # perform final merger
+
+        print 'Performing final merger on %d GVCF files of %d cells each.' % (len(gvcfs_to_merge), samples_per_chunk)
+
+        combine_gvcfs = [resources_v2.SingleCell.combine_gvcfs(gvcfs_to_merge,
+                                                               merged_gvcf,
                                                                human_fasta_file,
                                                                interval_file,
-                                                               dbsnp_file,
-                                                               merged_gvcf_dir,
-                                                               genotyping_dir)]
+                                                               genotyping_dir,
+                                                               genotyping_dir,
+                                                               multi_sample=True)]
 
         # wait for all processes to finish before continuing
         wait(combine_gvcfs)
 
-        chunk_number += 1
-        cells_processed += samples_per_chunk
-
-        print '\n%d of %d gvcfs combined (first stage).\n' % (cells_processed, len(cells))
-
-    # second stage merger
-    # find gvcf files from first merger stage
-
-    gvcfs_to_merge = [merged_gvcf_dir + f for f in os.listdir(merged_gvcf_dir) if f.split('.')[-1] == 'vcf']
-
-    # perform final merger
-
-    print 'Performing final merger on %d GVCF files of %d cells each.' % (len(gvcfs_to_merge), samples_per_chunk)
-
-    combine_gvcfs = [resources_v2.SingleCell.combine_gvcfs(gvcfs_to_merge,
-                                                           merged_gvcf,
-                                                           human_fasta_file,
-                                                           interval_file,
-                                                           dbsnp_file,
-                                                           genotyping_dir,
-                                                           genotyping_dir,
-                                                           multi_sample=True)]
-
-    # wait for all processes to finish before continuing
-    wait(combine_gvcfs)
-
-    print '''
+        print '''
 ####################################################################################
 # Step 10: genotype merged gvcfs
 ####################################################################################
 '''
-    genotype_gvcfs = [resources_v2.SingleCell.genotype_gvcfs(human_fasta_file,
-                                                             dbsnp_file,
-                                                             merged_gvcf,
-                                                             geno_vcf)]
+        genotype_gvcfs = [resources_v2.SingleCell.genotype_gvcfs(human_fasta_file,
+                                                                 dbsnp_file,
+                                                                 merged_gvcf,
+                                                                 geno_vcf,
+                                                                 interval_file)]
 
-    # wait for all processes to finish before continuing
-    wait(genotype_gvcfs)
+        # wait for all processes to finish before continuing
+        wait(genotype_gvcfs)
 
-    print '''
+        print '''
 ####################################################################################
 # Step 11: split multiallelic sites and annotate vcf
 ####################################################################################
 '''
-    # split and normalize variants
-    split_cmd = 'bcftools norm --threads 16 -f %s -m - %s > %s' % (human_fasta_file, geno_vcf, split_vcf)
-    subprocess.call(split_cmd, shell=True)
 
-    # annotate vcf with snpeff (functional)
-    annotate_cmd = 'snpEff ann -v -stats %s -c %s hg19 %s > %s' % (snpeff_summary,
-                                                                   snpeff_config,
-                                                                   split_vcf,
-                                                                   snpeff_annot_vcf)
-    subprocess.call(annotate_cmd, shell=True)
+        # split multiallelics, left-align, and trim
+        resources_v2.left_align_trim(human_fasta_file, geno_vcf, split_vcf)
 
-    # annotate with bcftools
-    # use clinvar and cosmic databases
-    temp_vcf = snpeff_annot_vcf[:-4] + '.temp.vcf'
-    resources_v2.bcftools_annotate(clinvar_vcf, snpeff_annot_vcf, '-c INFO', temp_vcf)
-    resources_v2.bcftools_annotate(cosmic_vcf, temp_vcf, '-c ID', annot_vcf)
+        # annotate vcf with snpeff (functional predictions)
+        resources_v2.snpeff_annotate(snpeff_summary, snpeff_config, split_vcf, snpeff_annot_vcf)
 
-    print '''
+        # annotate with bcftools
+        # use clinvar and cosmic databases
+        temp_vcf = snpeff_annot_vcf[:-4] + '.temp.vcf'
+        resources_v2.bcftools_annotate(clinvar_vcf, snpeff_annot_vcf, '-c INFO', temp_vcf)
+        resources_v2.bcftools_annotate(cosmic_vcf, temp_vcf, '-c ID', annot_vcf)
+
+        print '''
 ####################################################################################
 # Step 12: convert vcf to variant matrix
 ####################################################################################
-'''
+    '''
 
-    # parse vcf and save to tables
-    resources_v2.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
+        # parse vcf and save to tables
+        resources_v2.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
 
-    print '''
-####################################################################################
-# Step 13: cleanup temporary files
-####################################################################################
-'''
+    print 'Cleaning up temporary files...\n'
+
     #TODO add code to delete unnecessary files
 
     print 'Pipeline complete!'
