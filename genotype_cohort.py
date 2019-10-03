@@ -77,12 +77,41 @@ if __name__ == "__main__":
     # set variables and filepaths for this sample cohort
     ####################################################################################
 
-    output_dir = '/drive3/dabseq/cohorts/aml/abseq11_14_test/'
-    cohort_name = 'abseq11_14'
+    # single sample
+    output_dir = '/drive3/dabseq/cohorts/aml/abseq21_only/'
+    cohort_name = 'abseq21_only'
 
     # list of sample names
-    sample_names = ['abseq11',
-                    'abseq14']
+    sample_names = ['abseq21']
+
+    # # pediatric aml
+    # output_dir = '/drive3/dabseq/cohorts/aml/abseq8_only_test_all/'
+    # cohort_name = 'ped_aml_abseq8'
+    #
+    # # list of sample names
+    # sample_names = ['abseq8',
+    #                 'abseq18',
+    #                 'abseq10']
+
+    # # patient 655
+    # output_dir = '/drive3/dabseq/cohorts/aml/patient_655/'
+    # cohort_name = 'patient_655'
+    #
+    # # list of sample names
+    # sample_names = ['abseq11',
+    #                 'abseq14',
+    #                 'abseq19',
+    #                 'abseq21']
+
+    # # patient 577
+    # output_dir = '/drive3/dabseq/cohorts/aml/patient_577/'
+    # cohort_name = 'patient_577'
+    #
+    # # list of sample names
+    # sample_names = ['abseq13',
+    #                 'abseq17',
+    #                 'abseq15',
+    #                 'abseq16']
 
     # list of sample ids
     sample_ids = [s.split('seq')[1] for s in sample_names]
@@ -163,11 +192,13 @@ if __name__ == "__main__":
                 f.write(g.split('.')[0] + '-' + sample_ids[i] + '\t' + gvcf_paths[i] + g + '\n')
 
     # extract intervals from bed file
+    # exclude RUNX1_4 (used for antibodies)
     intervals = {}
     with open(interval_file, 'r') as f:
         for line in f:
-            fields = line.strip().split('\t')
-            intervals[fields[3]] = fields[0] + ':' + fields[1] + '-' + fields[2]
+            if 'RUNX1_4' not in line:
+                fields = line.strip().split('\t')
+                intervals[fields[3]] = fields[0] + ':' + fields[1] + '-' + fields[2]
 
     # create a genomics db and output vcf for each interval
     db_paths = {}
@@ -213,8 +244,7 @@ if __name__ == "__main__":
     ####################################################################################
 
     # call gatk to perform vcf merging
-    # exclude RUNX1_4 from final callset
-    vcfs_to_merge = ['-I ' + v for v in output_vcfs.values() if 'RUNX1_4' not in v]
+    vcfs_to_merge = ['-I ' + v for v in output_vcfs.values()]
     merge_cmd = 'gatk MergeVcfs %s -O %s' % (' '.join(vcfs_to_merge), genotyped_vcf)
 
     subprocess.call(merge_cmd, shell=True)
