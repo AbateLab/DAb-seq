@@ -13,15 +13,12 @@ import subprocess
 def pipeline(sample_basename, config_file):
     # initiates the mb pipeline
 
-    pipeline_cmd = 'python /home/bdemaree/code/dab-seq/mb_pipeline_v2.py --gvcf-only %s %s' % (sample_basename, config_file)
+    pipeline_cmd = 'python /home/bdemaree/code/dab-seq/mb_pipeline.py %s %s' % (sample_basename, config_file)
     subprocess.call(pipeline_cmd, shell=True)
 
 if __name__ == "__main__":
 
-    config_file = '/home/bdemaree/code/dab-seq/dabseq.cfg'
-
-    # sample_basenames = ['abseq' + str(i) for i in [6, 8, 9, 10, 11] + range(13, 20)]
-    sample_basenames = ['abseq' + str(i) for i in [11, 14, 19, 20, 21, 8, 18, 10, 13, 17, 15, 16, 6, 9]]
+    sample_basenames = ['abseq' + str(i) for i in [11, 14, 19, 21, 8, 18, 10, 13, 17, 15, 16, 6, 9]]
 
     # number of samples to process in parallel at a time
     # limit to 2 for dabseq samples on greyhound
@@ -35,6 +32,7 @@ if __name__ == "__main__":
     pool = multiprocessing.Pool(processes=n_parallel)
 
     for i in range(len(sample_basenames)):
+        config_file = '/drive3/dabseq/output/%s/dabseq.cfg' % sample_basenames[i]
         pool.apply_async(pipeline, args=(sample_basenames[i], config_file,))
 
     pool.close()
