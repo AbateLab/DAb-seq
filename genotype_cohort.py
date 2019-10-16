@@ -3,9 +3,9 @@
 dab-seq: single-cell dna genotyping and antibody sequencing
 ben demaree 7.9.2019
 
-script for performing joint genotyping of a cohort (including longitudinal data)
+script for performing joint genotyping of a cohort (multiple samples and/or longitudinal data)
 the main processing script must be run beforehand
-caution: this script uses A LOT of memory
+caution: this script uses A LOT of memory - run one or two samples at a time
 
 '''
 
@@ -13,9 +13,10 @@ import os
 import subprocess
 from slackclient import SlackClient
 import time
+import sys
 
 # import functions from external files
-import resources_v2
+import resources
 
 def slack_message(message):
     # for posting a notification to the server-alerts slack channel
@@ -50,7 +51,7 @@ def db_import(db_path, sample_map_path, interval):
 
     return process
 
-def joint_genotype(db_path, fasta, interval, dbSNP_file, output_vcf):
+def joint_genotype(db_path, fasta, interval, output_vcf):
     # perform joint genotyping across a cohort using data from a genomicsdb store
 
     # make call to gatk for genotyping
@@ -58,13 +59,11 @@ def joint_genotype(db_path, fasta, interval, dbSNP_file, output_vcf):
                    '-V %s ' \
                    '-R %s ' \
                    '-L %s ' \
-                   '-D %s ' \
                    '-O %s ' \
                    '--include-non-variant-sites' \
                    % (db_path,
                       fasta,
                       interval,
-                      dbSNP_file,
                       output_vcf)
 
     process = subprocess.Popen(genotype_cmd, shell=True)
@@ -74,201 +73,251 @@ def joint_genotype(db_path, fasta, interval, dbSNP_file, output_vcf):
 if __name__ == "__main__":
 
     ####################################################################################
-    # set variables and filepaths for this sample cohort
+    # set variables and filepaths for sample cohorts
     ####################################################################################
 
-    # single sample
-    output_dir = '/drive3/dabseq/cohorts/aml/abseq21_only/'
-    cohort_name = 'abseq21_only'
+    # dict of cohort names and corresponding abseq samples
 
-    # list of sample names
-    sample_names = ['abseq21']
+    cohorts = {'ped_aml': ['abseq8', 'abseq18', 'abseq10'],
+               'patient_577': ['abseq13', 'abseq17', 'abseq15', 'abseq16'],
+               'patient_655': ['abseq11', 'abseq14', 'abseq19', 'abseq21'],
+               'abseq6': ['abseq6'],
+               'abseq9': ['abseq9']
+               }
 
-    # # pediatric aml
-    # output_dir = '/drive3/dabseq/cohorts/aml/abseq8_only_test_all/'
-    # cohort_name = 'ped_aml_abseq8'
-    #
-    # # list of sample names
-    # sample_names = ['abseq8',
-    #                 'abseq18',
-    #                 'abseq10']
+    base_output_dir = '/drive3/dabseq/cohorts/aml/'
 
-    # # patient 655
-    # output_dir = '/drive3/dabseq/cohorts/aml/patient_655/'
-    # cohort_name = 'patient_655'
-    #
-    # # list of sample names
-    # sample_names = ['abseq11',
-    #                 'abseq14',
-    #                 'abseq19',
-    #                 'abseq21']
+    for cohort_name in cohorts:
 
-    # # patient 577
-    # output_dir = '/drive3/dabseq/cohorts/aml/patient_577/'
-    # cohort_name = 'patient_577'
-    #
-    # # list of sample names
-    # sample_names = ['abseq13',
-    #                 'abseq17',
-    #                 'abseq15',
-    #                 'abseq16']
+        sample_names = cohorts[cohort_name]
+        output_dir = base_output_dir + cohort_name + '/'
 
-    # list of sample ids
-    sample_ids = [s.split('seq')[1] for s in sample_names]
+        # create cohort folder if it does not exist
+        # note that GATK will not overwrite existing genomicsdbs
+        if not os.path.exists(output_dir):
+            os.mkdir(output_dir)
 
-    # list of directories containing single-sample gvcfs
-    gvcf_paths = ['/drive3/dabseq/output/' + s + '/cells/gvcf/' for s in sample_names]
+        # option to analyze flt3-itd variants
+        flt3_itd = True
 
-    # interval file path (EXCLUDING primer coordinates)
-    interval_file = '/home/bdemaree/abseq/panel_files/AML/AML.bed'
+        # minimum read depth and single-cell vaf for all flt3 variants
+        # this helps filter false positives
+        min_itd_dp = 20
+        min_itd_vaf = 0.15
 
-    # human reference genome fasta file path
-    human_fasta = '/drive2/igenomes/hg19/Homo_sapiens/UCSC/hg19/Sequence/WholeGenomeFasta/genome.fa'
+        # list of sample ids
+        sample_ids = [s.split('seq')[1] for s in sample_names]
 
-    # snpeff config file path
-    snpeff_config = '/usr/local/bin/snpEff/snpEff.config'
+        # sample map for gatk
+        sample_map = output_dir + cohort_name + '.sample_map.tsv'
 
-    # snpeff summary file path
-    snpeff_summary = output_dir + cohort_name + '.snpeff_summary.html'
+        # list of directories containing single-sample gvcfs
+        gvcf_paths = ['/drive3/dabseq/output/' + s + '/cells/gvcf/' for s in sample_names]
 
-    # genotyped vcf file
-    genotyped_vcf = output_dir + cohort_name + '.genotyped.vcf'
+        # list of directories containing flt3-itd vcf files
+        itd_paths = ['/drive3/dabseq/output/' + s + '/cells/flt3/' for s in sample_names]
 
-    # split vcf file
-    split_vcf = output_dir + cohort_name + '.split.vcf'
+        # interval file path (EXCLUDING primer coordinates)
+        interval_file = sys.path[0] + '/panel_files/AML/AML.bed'
 
-    # snpeff annotated vcf
-    snpeff_annot_vcf = output_dir + cohort_name + '.snpeff.annotated.vcf'
+        # human reference genome fasta file path
+        human_fasta = '/drive2/igenomes/hg19/Homo_sapiens/UCSC/hg19/Sequence/WholeGenomeFasta/genome.fa'
 
-    # final annotated vcf
-    annot_vcf = output_dir + cohort_name + '.annotated.vcf'
+        # snpeff config file path
+        snpeff_config = '/usr/local/bin/snpEff/snpEff.config'
 
-    # genotype hdf5 file
-    geno_hdf5 = output_dir + cohort_name + '.genotypes.hdf5'
+        # snpeff summary file path
+        snpeff_summary = output_dir + cohort_name + '.snpeff_summary.html'
 
-    # variant information table
-    variants_tsv = output_dir + cohort_name + '.variants.tsv'
+        # genotyped vcf file
+        genotyped_vcf = output_dir + cohort_name + '.genotyped.vcf'
 
-    # dbsnp file path
-    dbsnp_file = '/drive2/snp_dbs/dbSNP/common_all_20180423.vcf.gz'
+        # split vcf file
+        split_vcf = output_dir + cohort_name + '.split.vcf'
 
-    # clinvar vcf file path
-    clinvar_vcf = '/drive2/snp_dbs/clinvar_20190805_hg19/clinvar_20190805.hg19.vcf.gz'
+        # snpeff annotated vcf
+        snpeff_annot_vcf = output_dir + cohort_name + '.snpeff.annotated.vcf'
 
-    # cosmic vcf file path
-    cosmic_vcf = '/drive2/snp_dbs/cosmic_v89_hg19/CosmicAll_v89.hg19.vcf.gz'
+        # final annotated vcf
+        annot_vcf = output_dir + cohort_name + '.annotated.vcf'
 
-    ####################################################################################
-    # prepare gvcf and interval files for genotyping
-    ####################################################################################
+        # genotype hdf5 file
+        geno_hdf5 = output_dir + cohort_name + '.genotypes.hdf5'
 
-    # send slack notification
-    start_time = time.time()
-    start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
-    slack_message('Joint genotyping started for cohort %s [%s] at %s.' % (cohort_name,
-                                                                                  ', '.join(sample_names),
-                                                                                  start_time_fmt))
+        # variant information table
+        variants_tsv = output_dir + cohort_name + '.variants.tsv'
 
-    # base path for genomics db
-    db_dir = output_dir + 'dbs/'
-    if not os.path.exists(db_dir):
-        os.mkdir(db_dir)
+        # combined flt3 vcf
+        flt3_vcf = output_dir + cohort_name + '.flt3.vcf'
 
-    # base path for single-interval vcfs
-    vcf_dir = output_dir + 'vcfs/'
-    if not os.path.exists(vcf_dir):
-        os.mkdir(vcf_dir)
+        # clinvar vcf file path
+        clinvar_vcf = '/drive2/snp_dbs/clinvar_20190805_hg19/clinvar_20190805.hg19.vcf.gz'
 
-    # list of lists of gvcf files for each sample
-    gvcf_files = []
-    for path in gvcf_paths:
-        gvcf_files.append([f for f in os.listdir(path) if f.endswith('.g.vcf')])
+        # cosmic vcf file path
+        cosmic_vcf = '/drive2/snp_dbs/cosmic_v89_hg19/CosmicAll_v89.hg19.vcf.gz'
 
-    # create sample map file
-    sample_map_path = output_dir + cohort_name + '.sample_map.tsv'
-    with open(sample_map_path, 'w') as f:
-        for i in range(len(sample_names)):
-            for g in gvcf_files[i]:
-                f.write(g.split('.')[0] + '-' + sample_ids[i] + '\t' + gvcf_paths[i] + g + '\n')
+        ####################################################################################
+        # prepare gvcf and interval files for genotyping
+        ####################################################################################
 
-    # extract intervals from bed file
-    # exclude RUNX1_4 (used for antibodies)
-    intervals = {}
-    with open(interval_file, 'r') as f:
-        for line in f:
-            if 'RUNX1_4' not in line:
-                fields = line.strip().split('\t')
-                intervals[fields[3]] = fields[0] + ':' + fields[1] + '-' + fields[2]
+        # send slack notification
+        start_time = time.time()
+        start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
+        slack_message('Joint genotyping started for cohort %s [%s] at %s.' % (cohort_name,
+                                                                              ', '.join(sample_names),
+                                                                              start_time_fmt))
 
-    # create a genomics db and output vcf for each interval
-    db_paths = {}
-    output_vcfs = {}
-    for L in intervals:
-        db_paths[L] = db_dir + L + '.genomics.db'
-        output_vcfs[L] = vcf_dir + L + '.genotyped.vcf'
+        # base path for genomics db
+        db_dir = output_dir + 'dbs/'
+        if not os.path.exists(db_dir):
+            os.mkdir(db_dir)
 
-    ####################################################################################
-    # import gvcfs into genomics DB
-    ####################################################################################
+        # base path for single-interval vcfs
+        vcf_dir = output_dir + 'vcfs/'
+        if not os.path.exists(vcf_dir):
+            os.mkdir(vcf_dir)
 
-    # parallelize by starting a process for each interval
-    import_processes = []
+        # list of lists of gvcf files for each sample
+        gvcf_files = []
+        for path in gvcf_paths:
+            gvcf_files.append([f for f in os.listdir(path) if f.endswith('.g.vcf')])
 
-    for L in intervals:
-        import_processes.append(db_import(db_paths[L],
-                                          sample_map_path,
-                                          intervals[L]))
+        # optional: list of lists of flt3 vcf files for each sample
+        if flt3_itd:
+            itd_files = []
+            for path in itd_paths:
+                itd_files.append([path + f for f in os.listdir(path) if f.endswith('.vcf')])
 
-    # wait for processes to finish
-    wait(import_processes)
+        # create sample map file
+        with open(sample_map, 'w') as f:
+            for i in range(len(sample_names)):
+                for g in gvcf_files[i]:
+                    f.write(g.split('.')[0] + '-' + sample_ids[i] + '\t' + gvcf_paths[i] + g + '\n')
 
-    ####################################################################################
-    # perform joint genotyping
-    ####################################################################################
+        # extract intervals from bed file
+        # option to exclude RUNX1_4 (used for antibodies)
+        exclude_RUNX1_4 = True
+        intervals = {}
+        with open(interval_file, 'r') as f:
+            for line in f:
+                if exclude_RUNX1_4 and 'RUNX1_4' not in line:
+                    fields = line.strip().split('\t')
+                    intervals[fields[3]] = fields[0] + ':' + fields[1] + '-' + fields[2]
 
-    # parallelize by starting a process for each interval
-    genotype_processes = []
+        # create a genomics db and output vcf for each interval
+        db_paths = {}
+        output_vcfs = {}
+        for L in intervals:
+            db_paths[L] = db_dir + L + '.genomics.db'
+            output_vcfs[L] = vcf_dir + L + '.genotyped.vcf'
 
-    for L in intervals:
-        genotype_processes.append(joint_genotype('gendb://' + db_paths[L],
-                                                 human_fasta,
-                                                 intervals[L],
-                                                 dbsnp_file,
-                                                 output_vcfs[L]))
+        ####################################################################################
+        # import gvcfs into genomics DB
+        ####################################################################################
 
-    # wait for processes to finish
-    wait(genotype_processes)
+        # parallelize by starting a process for each interval
+        import_processes = []
 
-    ####################################################################################
-    # merge single-interval vcfs
-    ####################################################################################
+        for L in intervals:
+            import_processes.append(db_import(db_paths[L],
+                                              sample_map,
+                                              intervals[L]))
 
-    # call gatk to perform vcf merging
-    vcfs_to_merge = ['-I ' + v for v in output_vcfs.values()]
-    merge_cmd = 'gatk MergeVcfs %s -O %s' % (' '.join(vcfs_to_merge), genotyped_vcf)
+        # wait for processes to finish
+        wait(import_processes)
 
-    subprocess.call(merge_cmd, shell=True)
+        ####################################################################################
+        # perform joint genotyping
+        ####################################################################################
 
-    ####################################################################################
-    # split multiallelic sites and annotate vcf
-    ####################################################################################
+        # parallelize by starting a process for each interval
+        genotype_processes = []
 
-    # split multiallelics, left-align, and trim
-    resources_v2.left_align_trim(human_fasta, genotyped_vcf, split_vcf)
+        for L in intervals:
+            genotype_processes.append(joint_genotype('gendb://' + db_paths[L],
+                                                     human_fasta,
+                                                     intervals[L],
+                                                     output_vcfs[L]))
 
-    # annotate vcf with snpeff (functional predictions)
-    resources_v2.snpeff_annotate(snpeff_summary, snpeff_config, split_vcf, snpeff_annot_vcf)
+        # wait for processes to finish
+        wait(genotype_processes)
 
-    # annotate with bcftools
-    # use clinvar database
-    resources_v2.bcftools_annotate(clinvar_vcf, snpeff_annot_vcf, '-c INFO', annot_vcf)
+        ####################################################################################
+        # merge single-interval vcfs
+        ####################################################################################
 
-    # convert vcf to variant matrix in hdf5 format
-    resources_v2.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
+        # call gatk to perform vcf merging
+        vcfs_to_merge = ['-I ' + v for v in output_vcfs.values()]
+        merge_cmd = 'gatk MergeVcfs %s -O %s' % (' '.join(vcfs_to_merge), genotyped_vcf)
 
-    print 'Pipeline complete!'
+        subprocess.call(merge_cmd, shell=True)
 
-    # send slack notification
-    elapsed_time = time.time() - start_time
-    elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
-    slack_message('Pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name, elapsed_time_fmt))
+        ####################################################################################
+        # split multiallelic sites and annotate vcf
+        ####################################################################################
+
+        # split multiallelics, left-align, and trim
+        resources.left_align_trim(human_fasta, genotyped_vcf, split_vcf)
+
+        # annotate vcf with snpeff (functional predictions)
+        resources.snpeff_annotate(snpeff_summary, snpeff_config, split_vcf, snpeff_annot_vcf)
+
+        # annotate with bcftools
+        # use clinvar database
+        resources.bcftools_annotate(clinvar_vcf, snpeff_annot_vcf, '-c INFO', annot_vcf)
+
+        # convert vcf to variant matrix in hdf5 format
+        # optional: include itd calls
+
+        if flt3_itd:
+            # combine flt3 itd vcf files from all samples
+            # only include variants with sufficient read depth
+
+            with open(flt3_vcf, 'w') as v:
+                header = True
+                for i in range(len(sample_names)):
+                    for itd in itd_files[i]:
+                        with open(itd, 'r') as f:
+                            for line in f:
+                                if header and line[0] == '#':
+                                    v.write(line)
+                                    continue
+
+                                header = False
+                                cell_barcode = itd.split('.')[0].split('/')[-1] + '-' + sample_ids[i]
+
+                                if line[0] != '#':
+                                    depth = int(line.split('\t')[5])
+                                    vaf = float(line.strip().split('=')[-1])
+                                    if depth >= min_itd_dp and vaf >= min_itd_vaf:
+                                        # add cell barcode to id column
+                                        vcf_record = '\t'.join(line.split('\t')[:2] + [cell_barcode] + line.split('\t')[3:])
+                                        v.write(vcf_record)
+                                    else:
+                                        break
+
+            resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv, flt3_vcf)
+
+        else:
+            resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
+
+        # compress the final annotated vcf to reduce size
+        subprocess.call('gzip %s' % annot_vcf, shell=True)
+
+        ####################################################################################
+        # clean up temporary files
+        ####################################################################################
+
+        os.remove(sample_map)
+        os.remove(genotyped_vcf)
+        os.remove(genotyped_vcf + '.idx')
+        os.remove(split_vcf)
+        os.remove(snpeff_annot_vcf + '.gz')
+        os.remove(snpeff_annot_vcf + '.gz.tbi')
+
+        print 'Pipeline complete!'
+
+        # send slack notification
+        elapsed_time = time.time() - start_time
+        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+        slack_message('Pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name, elapsed_time_fmt))
