@@ -770,58 +770,69 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
     # optional: add flt3-itd variants to table
     if itd_vcf_file:
 
-        itd_vcf = allel.read_vcf(itd_vcf_file, fields=['*'])
+        # make sure flt3 vcf is not empty
+        empty = True
+        with open(itd_vcf_file, 'r') as f:
+            for line in f:
+                if line[0] != '#':
+                    empty = False
+                    break
 
-        # create itd variant names
-        itd_names = ['FLT3-ITD' +
-                     ':' + itd_vcf['variants/CHROM'][i] +
-                     ':' + str(itd_vcf['variants/POS'][i]) +
-                     ':' + itd_vcf['variants/REF'][i] +
-                     '/' + itd_vcf['variants/ALT'][:, 0][i]
-                     for i in range((itd_vcf['variants/REF'].shape[0]))]
+        if not empty:
 
-        # add itd variant rows to variants table
-        itd_table = pd.DataFrame(data=list(set(itd_names)), columns=['Name'])
-        names += list(set(itd_names))
-        variants_table = pd.concat([variants_table, itd_table], sort=True)
+            itd_vcf = allel.read_vcf(itd_vcf_file, fields=['*'])
 
-        # add itd variants to other layers
-        # set RD = AD and GQ = 100 when itd is present
-        # default for GT is 'no call' (3)
+            # create itd variant names
+            itd_names = ['FLT3-ITD' +
+                         ':' + itd_vcf['variants/CHROM'][i] +
+                         ':' + str(itd_vcf['variants/POS'][i]) +
+                         ':' + itd_vcf['variants/REF'][i] +
+                         '/' + itd_vcf['variants/ALT'][:, 0][i]
+                         for i in range((itd_vcf['variants/REF'].shape[0]))]
 
-        # create additional array entries
-        GT = np.concatenate((GT, 3 * np.ones((itd_table.shape[0], GT.shape[1]))), axis=0)
-        GQ = np.concatenate((GQ, np.zeros((itd_table.shape[0], GQ.shape[1]))), axis=0)
-        DP = np.concatenate((DP, np.zeros((itd_table.shape[0], DP.shape[1]))), axis=0)
-        AD = np.concatenate((AD, np.zeros((itd_table.shape[0], AD.shape[1]))), axis=0)
-        RD = np.concatenate((RD, np.zeros((itd_table.shape[0], RD.shape[1]))), axis=0)
+            # add itd variant rows to variants table
+            itd_table = pd.DataFrame(data=list(set(itd_names)), columns=['Name'])
+            names += list(set(itd_names))
+            variants_table = pd.concat([variants_table, itd_table], sort=True)
 
-        # indices for adding entries to arrays
-        var_ind = dict(zip(names, range(len(names))))
-        bar_ind = dict(zip(vcf['samples'], range(len(vcf['samples']))))
+            # add itd variants to other layers
+            # set RD = AD and GQ = 100 when itd is present
+            # default for GT is 'no call' (3)
 
-        # for each cell barcode, add entry to genotyping array
-        for i in range(len(itd_vcf['variants/ID'])):
-            cell_barcode = itd_vcf['variants/ID'][i]
-            alt_depth = itd_vcf['variants/QUAL'][i]
-            vaf = itd_vcf['variants/VAF'][i]
-            total_depth = int(round(np.true_divide(alt_depth, vaf)))
+            # create additional array entries
+            GT = np.concatenate((GT, 3 * np.ones((itd_table.shape[0], GT.shape[1]))), axis=0)
+            GQ = np.concatenate((GQ, np.zeros((itd_table.shape[0], GQ.shape[1]))), axis=0)
+            DP = np.concatenate((DP, np.zeros((itd_table.shape[0], DP.shape[1]))), axis=0)
+            AD = np.concatenate((AD, np.zeros((itd_table.shape[0], AD.shape[1]))), axis=0)
+            RD = np.concatenate((RD, np.zeros((itd_table.shape[0], RD.shape[1]))), axis=0)
 
-            # set GT according to vaf
-            # het mut
-            if vaf < 0.9:
-                geno = 1
+            # indices for adding entries to arrays
+            var_ind = dict(zip(names, range(len(names))))
+            bar_ind = dict(zip(vcf['samples'], range(len(vcf['samples']))))
 
-            # hom mut
-            else:
-                geno = 2
+            # for each cell barcode, add entry to genotyping array
+            for i in range(len(itd_vcf['variants/ID'])):
+                cell_barcode = itd_vcf['variants/ID'][i]
+                alt_depth = itd_vcf['variants/QUAL'][i]
+                vaf = itd_vcf['variants/VAF'][i]
+                print vaf
+                total_depth = int(round(np.true_divide(alt_depth, vaf)))
 
-            # store entries in genotyping array
-            GT[var_ind[itd_names[i]], bar_ind[cell_barcode]] = geno
-            GQ[var_ind[itd_names[i]], bar_ind[cell_barcode]] = 100
-            DP[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
-            RD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
-            AD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = alt_depth
+                # set GT according to vaf
+                # het mut
+                if vaf < 0.9:
+                    geno = 1
+
+                # hom mut
+                else:
+                    geno = 2
+
+                # store entries in genotyping array
+                GT[var_ind[itd_names[i]], bar_ind[cell_barcode]] = geno
+                GQ[var_ind[itd_names[i]], bar_ind[cell_barcode]] = 100
+                DP[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
+                RD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
+                AD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = alt_depth
 
     # save variants to file
     variants_table.to_csv(path_or_buf=variants_tsv, sep='\t', index=False)
