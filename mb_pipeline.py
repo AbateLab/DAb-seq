@@ -12,7 +12,6 @@ import subprocess
 import argparse
 import copy
 import sys
-from slackclient import SlackClient
 import time
 from multiprocessing.pool import ThreadPool
 from multiprocessing import Process, Queue
@@ -21,16 +20,25 @@ from multiprocessing import Process, Queue
 import resources
 import cell_calling
 
-def slack_message(message):
-    # for posting a notification to the server-alerts slack channel
+# option to enable slack messages
+slack_enabled = True
+slack_token_file = '/home/bdemaree/.slack_token'
 
-    channel = 'server-alerts'
-    token = 'xoxp-7171342752-7171794564-486340412737-91fd92781cde6307b077f30f9ea1b700'
-    sc = SlackClient(token)
+def slack_message(message, enabled=False, slack_token_file=None):
+    # for posting a notification to a slack channel
 
-    sc.api_call('chat.postMessage', channel=channel,
-                text=message, username='pipelines',
-                icon_emoji=':adam:')
+    if enabled:
+        from slackclient import SlackClient
+
+        with open(slack_token_file) as f:
+            token = f.readline().strip()
+
+        channel = 'server-alerts'
+        sc = SlackClient(token)
+
+        sc.api_call('chat.postMessage', channel=channel,
+                    text=message, username='pipelines',
+                    icon_emoji=':adam:')
 
 def wait(processes):
     # waits for processes to finish
@@ -484,7 +492,9 @@ Initializing pipeline...
     # send slack notification
     start_time = time.time()
     start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
-    slack_message('Pipeline started for sample %s at %s.' % (sample_basename, start_time_fmt))
+    slack_message('Pipeline started for sample %s at %s.' % (sample_basename, start_time_fmt),
+                  slack_enabled,
+                  slack_token_file)
 
 
     print '''
@@ -513,7 +523,6 @@ Initializing pipeline...
 
     # display and write sample summary file
     file_summary(samples, summary, cfg=cfg_f, to_file=True)
-
 
     print '''
 ####################################################################################
@@ -771,4 +780,6 @@ Step 6: write valid cells from panel reads to separate fastq files
     # send slack notification
     elapsed_time = time.time() - start_time
     elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
-    slack_message('Pipeline complete for sample %s! Total elapsed time is %s.' % (sample_basename, elapsed_time_fmt))
+    slack_message('Pipeline complete for sample %s! Total elapsed time is %s.' % (sample_basename, elapsed_time_fmt),
+                  slack_enabled,
+                  slack_token_file)
