@@ -11,23 +11,32 @@ caution: this script uses A LOT of memory - run one or two samples at a time
 
 import os
 import subprocess
-from slackclient import SlackClient
 import time
 import sys
+from collections import OrderedDict
 
 # import functions from external files
 import resources
 
-def slack_message(message):
-    # for posting a notification to the server-alerts slack channel
+# option to enable slack messages
+slack_enabled = True
+slack_token_file = '/home/bdemaree/.slack_token'
 
-    channel = 'server-alerts'
-    token = 'xoxp-7171342752-7171794564-486340412737-91fd92781cde6307b077f30f9ea1b700'
-    sc = SlackClient(token)
+def slack_message(message, enabled=False, slack_token_file=None):
+    # for posting a notification to a slack channel
 
-    sc.api_call('chat.postMessage', channel=channel,
-                text=message, username='pipelines',
-                icon_emoji=':adam:')
+    if enabled:
+        from slackclient import SlackClient
+
+        with open(slack_token_file) as f:
+            token = f.readline().strip()
+
+        channel = 'server-alerts'
+        sc = SlackClient(token)
+
+        sc.api_call('chat.postMessage', channel=channel,
+                    text=message, username='pipelines',
+                    icon_emoji=':adam:')
 
 def wait(processes):
     # waits for processes to finish
@@ -78,12 +87,12 @@ if __name__ == "__main__":
 
     # dict of cohort names and corresponding abseq samples
 
-    cohorts = {'ped_aml': ['abseq8', 'abseq18', 'abseq10'],
-               'patient_577': ['abseq13', 'abseq17', 'abseq15', 'abseq16'],
-               'patient_655': ['abseq11', 'abseq14', 'abseq19', 'abseq21'],
-               'abseq6': ['abseq6'],
-               'abseq9': ['abseq9']
-               }
+    cohorts = OrderedDict()
+    cohorts['abseq6'] = ['abseq6']
+    cohorts['abseq9'] = ['abseq9']
+    cohorts['ped_aml'] = ['abseq8', 'abseq18', 'abseq10']
+    cohorts['patient_577'] = ['abseq13', 'abseq17', 'abseq15', 'abseq16']
+    cohorts['patient_655'] = ['abseq11', 'abseq14', 'abseq19', 'abseq21']
 
     base_output_dir = '/drive3/dabseq/cohorts/aml/'
 
@@ -102,7 +111,7 @@ if __name__ == "__main__":
 
         # minimum read depth and single-cell vaf for all flt3 variants
         # this helps filter false positives
-        min_itd_dp = 20
+        min_itd_dp = 15
         min_itd_vaf = 0.15
 
         # list of sample ids
@@ -165,7 +174,9 @@ if __name__ == "__main__":
         start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
         slack_message('Joint genotyping started for cohort %s [%s] at %s.' % (cohort_name,
                                                                               ', '.join(sample_names),
-                                                                              start_time_fmt))
+                                                                              start_time_fmt),
+                      slack_enabled,
+                      slack_token_file)
 
         # base path for genomics db
         db_dir = output_dir + 'dbs/'
@@ -279,9 +290,12 @@ if __name__ == "__main__":
                     for itd in itd_files[i]:
                         with open(itd, 'r') as f:
                             for line in f:
-                                if header and line[0] == '#':
+                                if header and line[:2] == '##':
                                     v.write(line)
                                     continue
+
+                                elif header and line[:2] == '#C':
+                                    v.write(line)
 
                                 header = False
                                 cell_barcode = itd.split('.')[0].split('/')[-1] + '-' + sample_ids[i]
@@ -308,16 +322,24 @@ if __name__ == "__main__":
         # clean up temporary files
         ####################################################################################
 
-        os.remove(sample_map)
-        os.remove(genotyped_vcf)
-        os.remove(genotyped_vcf + '.idx')
-        os.remove(split_vcf)
-        os.remove(snpeff_annot_vcf + '.gz')
-        os.remove(snpeff_annot_vcf + '.gz.tbi')
+        try:
+            os.remove(sample_map)
+            os.remove(genotyped_vcf)
+            os.remove(genotyped_vcf + '.idx')
+            os.remove(split_vcf)
+            os.remove(snpeff_annot_vcf + '.gz')
+            os.remove(snpeff_annot_vcf + '.gz.tbi')
+
+        except OSError:
+            pass
+
+        ####################################################################################
 
         print 'Pipeline complete!'
 
         # send slack notification
         elapsed_time = time.time() - start_time
         elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
-        slack_message('Pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name, elapsed_time_fmt))
+        slack_message('Pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name, elapsed_time_fmt),
+                      slack_enabled,
+                      slack_token_file)
