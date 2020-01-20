@@ -142,9 +142,11 @@ class TapestriSample(object):
             cmd = 'python3 /usr/local/bin/cutadapt' \
                   ' -a %s' \
                   ' -A %s' \
-                  ' --interleaved -j 16 -u 51 -U 5 -n 3 -O 8 -e 0.2 %s %s --quiet' \
+                  ' --interleaved -j 16 -u 60 -U 15 -n 3 -O 8 -m %s:%s -e 0.2 %s %s --quiet' \
                   % (r1_end,
                      r2_end,
+                     r1_min_len,
+                     r2_min_len,
                      r1_in,
                      r2_in)
 
@@ -162,10 +164,12 @@ class TapestriSample(object):
                   ' -g %s' \
                   ' -a %s' \
                   ' -A %s' \
-                  ' --interleaved -j 16 -n 3 -O 8 -e 0.2 %s %s --quiet' \
+                  ' --interleaved -j 16 -n 3 -O 8 -m %s:%s -e 0.2 %s %s --quiet' \
                   % (r1_start,
                      r1_end,
                      r2_end,
+                     r1_min_len,
+                     r2_min_len,
                      r1_in,
                      r2_in)
 
@@ -200,18 +204,15 @@ class TapestriSample(object):
             except KeyError:
                 continue
 
-            if len(seq_1) < r1_min_len or len(seq_2) < r2_min_len:
-                continue
+            # if a valid read
+            # add barcode to header id
+            id = '@' + id_1 + '_' + cell_barcode
 
-            else:
-                # add barcode to header id
-                id = '@' + id_1 + '_' + cell_barcode
+            # write to output fastq files
+            r1_out.write('%s\n%s\n+\n%s\n' % (id, seq_1, qual_1))
+            r2_out.write('%s\n%s\n+\n%s\n' % (id, seq_2, qual_2))
 
-                # write to output fastq files
-                r1_out.write('%s\n%s\n+\n%s\n' % (id, seq_1, qual_1))
-                r2_out.write('%s\n%s\n+\n%s\n' % (id, seq_2, qual_2))
-
-                bar_count += 1
+            bar_count += 1
 
         print '%d total valid trimmed pairs saved to file.' % bar_count
 
@@ -349,9 +350,6 @@ class SingleCell(object):
 
 def count_alignments(r1_files, amplicon_file, fasta_file, tsv, dir):
     # align and count r1 reads for all barcodes, and save to tsv file
-
-    # set minimum quality for counting read
-    min_mapq = 3
 
     # get fasta file from human genome for this interval
     insert_fasta = dir + 'amplicons.fasta'
@@ -678,6 +676,9 @@ def count_umis(ab_reads_file, umi_counts_file, n_procs=24):
             f.write('\t'.join(group.split('+')) + '\t' + str(raw_counts_dict[group]) + '\t')
             f.write('\t'.join([str(counts_by_method[group][m]) for m in count_methods]) + '\n')
 
+    # gzip the ab reads file to save space
+    subprocess.call('gzip -f %s' % ab_reads_file, shell=True)
+
     print 'All UMIs grouped and saved to %s.\n' % umi_counts_file
 
 def left_align_trim(human_fasta_file, geno_vcf, split_vcf):
@@ -712,7 +713,6 @@ def bcftools_annotate(annotations_vcf, input_vcf, column_info, output_vcf):
                                                       input_vcf + '.gz',
                                                       output_vcf)
     subprocess.call(bcf_cmd, shell=True)
-
 
 def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
     # parses a vcf file into a series of tables
@@ -797,10 +797,10 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
 
             # add itd variants to other layers
             # set RD = AD and GQ = 100 when itd is present
-            # default for GT is 'no call' (3)
+            # default for GT is 'WT' (0) - no ITD present
 
             # create additional array entries
-            GT = np.concatenate((GT, 3 * np.ones((itd_table.shape[0], GT.shape[1]))), axis=0)
+            GT = np.concatenate((GT, np.zeros((itd_table.shape[0], GT.shape[1]))), axis=0)
             GQ = np.concatenate((GQ, np.zeros((itd_table.shape[0], GQ.shape[1]))), axis=0)
             DP = np.concatenate((DP, np.zeros((itd_table.shape[0], DP.shape[1]))), axis=0)
             AD = np.concatenate((AD, np.zeros((itd_table.shape[0], AD.shape[1]))), axis=0)
@@ -815,7 +815,6 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
                 cell_barcode = itd_vcf['variants/ID'][i]
                 alt_depth = itd_vcf['variants/QUAL'][i]
                 vaf = itd_vcf['variants/VAF'][i]
-                print vaf
                 total_depth = int(round(np.true_divide(alt_depth, vaf)))
 
                 # set GT according to vaf
@@ -835,7 +834,7 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
                 AD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = alt_depth
 
     # save variants to file
-    variants_table.to_csv(path_or_buf=variants_tsv, sep='\t', index=False)
+    variants_table.to_csv(path_or_buf=variants_tsv, sep='\t', index=False, encoding='utf-8')
 
     # encode variant names and cell barcodes
     names = [n.encode('utf8') for n in names]

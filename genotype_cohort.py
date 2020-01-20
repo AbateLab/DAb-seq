@@ -14,6 +14,7 @@ import subprocess
 import time
 import sys
 from collections import OrderedDict
+from multiprocessing.pool import ThreadPool
 
 # import functions from external files
 import resources
@@ -108,6 +109,9 @@ if __name__ == "__main__":
 
         # option to analyze flt3-itd variants
         flt3_itd = True
+
+        # option to exclude RUNX1_4 (used for antibodies)
+        exclude_RUNX1_4 = False
 
         # minimum read depth and single-cell vaf for all flt3 variants
         # this helps filter false positives
@@ -206,12 +210,12 @@ if __name__ == "__main__":
                     f.write(g.split('.')[0] + '-' + sample_ids[i] + '\t' + gvcf_paths[i] + g + '\n')
 
         # extract intervals from bed file
-        # option to exclude RUNX1_4 (used for antibodies)
-        exclude_RUNX1_4 = True
         intervals = {}
         with open(interval_file, 'r') as f:
             for line in f:
-                if exclude_RUNX1_4 and 'RUNX1_4' not in line:
+                if exclude_RUNX1_4 and 'RUNX1_4' in line:
+                    continue
+                else:
                     fields = line.strip().split('\t')
                     intervals[fields[3]] = fields[0] + ':' + fields[1] + '-' + fields[2]
 
@@ -226,16 +230,21 @@ if __name__ == "__main__":
         # import gvcfs into genomics DB
         ####################################################################################
 
-        # parallelize by starting a process for each interval
-        import_processes = []
+        # limit number of intervals to process at a time (based on hardware limitations)
+        n_process = 60
 
+        # create pool of workers and run through all samples
+        process_pool = ThreadPool(processes=n_process)
+
+        # import intervals
         for L in intervals:
-            import_processes.append(db_import(db_paths[L],
-                                              sample_map,
-                                              intervals[L]))
+            process_pool.apply_async(db_import, args=(db_paths[L],
+                                                      sample_map,
+                                                      intervals[L],
+                                                      ))
 
-        # wait for processes to finish
-        wait(import_processes)
+        process_pool.close()
+        process_pool.join()
 
         ####################################################################################
         # perform joint genotyping
@@ -316,7 +325,7 @@ if __name__ == "__main__":
             resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
 
         # compress the final annotated vcf to reduce size
-        subprocess.call('gzip %s' % annot_vcf, shell=True)
+        subprocess.call('gzip -f %s' % annot_vcf, shell=True)
 
         ####################################################################################
         # clean up temporary files

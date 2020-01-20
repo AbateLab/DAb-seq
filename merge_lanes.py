@@ -14,10 +14,11 @@ import shutil
 
 if __name__ == "__main__":
 
-    base_dir = '/drive2/iarpa/te2/te_2_1'
+    input_folder = '/drive2/iarpa/te2/te_2_2/fastq'
+    output_folder = '/drive2/iarpa/te2/te_2_2/merged'
 
-    samples = list(set([f.split('_')[0] for f in os.listdir(base_dir) if '.fastq.gz' in f]))
-    output_folder = base_dir + '/merged'
+    samples = list(set([f.split('_')[0] for f in os.listdir(input_folder) if '.fastq.gz' in f]))
+
 
     try:
         os.mkdir(output_folder)
@@ -28,7 +29,7 @@ if __name__ == "__main__":
 
         print 'Merging sample %s' % samples[j]
 
-        sample_fastq = [f for f in os.listdir(base_dir) if f.split('_')[0] == samples[j]]
+        sample_fastq = [f for f in os.listdir(input_folder) if f.split('_')[0] == samples[j]]
 
         # merge R1
         r1_files = re.compile('.*_R1_.*')
@@ -37,7 +38,7 @@ if __name__ == "__main__":
         r1_new = re.sub(r'_L\d\d\d_R1_', r'_L000_R1_', to_merge_r1[0])
         r1_new = os.path.join(output_folder, os.path.basename(r1_new))
 
-        to_merge_r1 = [base_dir + '/' + f for f in to_merge_r1]
+        to_merge_r1 = [input_folder + '/' + f for f in to_merge_r1]
 
         print "     Merging files %s into %s..." % (', '.join(to_merge_r1), r1_new)
         subprocess.call('cat %s > %s' % (' '.join(to_merge_r1), r1_new), shell=True)
@@ -50,7 +51,7 @@ if __name__ == "__main__":
             r2_new = re.sub(r'_L\d\d\d_R2_', r'_L000_R2_', to_merge_r2[0])
             r2_new = os.path.join(output_folder, os.path.basename(r2_new))
 
-            to_merge_r2 = [base_dir + '/' + f for f in to_merge_r2]
+            to_merge_r2 = [input_folder + '/' + f for f in to_merge_r2]
 
             print "     Merging files %s into %s..." % (', '.join(to_merge_r2), r2_new)
             subprocess.call('cat %s > %s' % (' '.join(to_merge_r2), r2_new), shell=True)

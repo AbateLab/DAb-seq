@@ -14,7 +14,7 @@ import copy
 import sys
 import time
 from multiprocessing.pool import ThreadPool
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 
 # import functions from external files
 import resources
@@ -233,7 +233,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='''
     
     dab-seq: single-cell dna genotyping and antibody sequencing
-    ben demaree 2019
+    ben demaree 2020
     
     input requirements:
     -config file defining file paths and variables (dabseq.cfg)
@@ -256,12 +256,14 @@ if __name__ == "__main__":
 
     parser.add_argument('sample_name', type=str, help='sample basename')
     parser.add_argument('cfg_file', type=str, help='config filename')
+    parser.add_argument('--chem', default='V1', choices=['V1', 'V2'], help='chemistry version (V1 or V2) (default: V1)')
     parser.add_argument('--dna-only', action='store_true', default=False, help='option to run dna panel pipeline only')
     parser.add_argument('--skip-flt3', action='store_true', default=False, help='option to skip FLT3-ITD calling')
 
     args = parser.parse_args()  # parse arguments
 
     sample_basename = args.sample_name
+    chem = args.chem
     cfg_f = args.cfg_file
     dna_only = args.dna_only
     skip_flt3 = args.skip_flt3
@@ -398,26 +400,6 @@ ii,,:i:,,,,,,,,,,,,+*,,,,,,,,,,:z..............i+,,,,,,,,,,,:#.                 
                                                         *########################n`                                                                   
                                                         n########################x,                                                                   
                                                        ,n########################n,                                                                   
-                                                       +#########################n:                                                                   
-                                                      `n#########################z;                                                                   
-                                                      ;z########znxxxxxxnzz######z;                                                                   
-                                                      z######nnz+i;:::::;*#nxz###z:                                                                   
-                                                     ,n###zxz;:,,,,,,,,,,,,,:*nn#n,                                                                   
-                                                     ,n#zx#:,,,,,,,,,,,,,,,,,,:*nn`                                                                   
-                                                      znz;,,,,,,,,,,,,,,,,,,,,,,;+                                                                    
-                                                      .#,,,,,,,,,,,,,,,,,,,,,,,,+:                                                                    
-                                                      .*,,,,,,,,,,,,,,,,,,,,,,,,+.                                                                    
-                                                      i;,,,,,,,,,,,,,,,,,,,,,,,,#                                                                     
-                                                     `#,,,,,,,,,,,,,,,,,,,,,,,,:+                                                                     
-                                                     ;i,,,,,,,,,,,,,,,,,,,,,,,,i:                                                                     
-                                                     #:,,,,,,,,,,,,,,,,,,,,,,,:z`                                                                     
-                                                    ,+,,,,,,,,,,,,,,,,,,,,,,,,z;                                                                      
-                                                    +:,,,,,,,,,,,,,,,,,,,,,,:#n`                                                                      
-                                                   .#,,,,:i,,,,,,,,,,,,,,,,:#i#                                                                       
-                                                   *;,,,,*ni,,,,,,,,i:,,,;iz;,#                                                                       
-                                                  `#,,,,:z:+#i:,,,,,#:,,,#*:,,+                                                                       
-                                                  i;,,,,**,,:+##z##*z,,,,#:,,,+                                                                       
-                                                 `+,,,,:z,,,,,,,#. `#,,,,#:,,,+                                                                                                                                          
 
 Initializing pipeline...
 
@@ -489,13 +471,37 @@ Initializing pipeline...
         if not os.path.exists(d):
             os.mkdir(d)
 
+    # setup barcode extraction parameters based on chemistry
+    if chem == 'V1':
+        cell_barcode_csv_file = sys.path[0] + '/barcodes/mb_cell_barcodes_v1.csv'
+
+        r1_start = 'CGATGACG'
+        r1_end = 'CTGTCTCTTATACACATCT'
+        r2_end = 'CGTCATCG'
+
+        bar_ind_1, bar_ind_2 = range(8), range(-8, 0)
+
+    elif chem == 'V2':
+        cell_barcode_csv_file = sys.path[0] + '/barcodes/mb_cell_barcodes_v2.csv'
+
+        r1_start = 'GTACTCGCAGTAGTC'
+        r1_end = 'CTGTCTCTTATACACATCT'
+        r2_end = 'GACTACTGCGAGTAC'
+
+        bar_ind_1, bar_ind_2 = range(9), range(-9, 0)
+
+    # set minimum read lengths (should rarely need to be modified)
+    r1_min_len_panel = 30
+    r2_min_len_panel = 25
+    r1_min_len_ab = 0
+    r2_min_len_ab = 30
+
     # send slack notification
     start_time = time.time()
     start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
     slack_message('Pipeline started for sample %s at %s.' % (sample_basename, start_time_fmt),
                   slack_enabled,
                   slack_token_file)
-
 
     print '''
 ####################################################################################
@@ -531,10 +537,10 @@ Initializing pipeline...
 '''
 
     # load mission bio barcode csv file
-    barcodes = resources_v2.load_barcodes(cell_barcode_csv_file, 1, False)
+    barcodes = resources.load_barcodes(cell_barcode_csv_file, 1, False)
 
     # generate hamming dictionary for error correction
-    barcodes = resources_v2.generate_hamming_dict(barcodes)
+    barcodes = resources.generate_hamming_dict(barcodes)
 
     print '%d unique barcode sequences loaded into dictionary.\n' % len(barcodes)
 
@@ -616,11 +622,11 @@ Initializing pipeline...
     if not dna_only:
 
         # load ab barcode csv file (with descriptions)
-        barcodes = resources_v2.load_barcodes(ab_barcode_csv_file, 1, False)
+        barcodes = resources.load_barcodes(ab_barcode_csv_file, 1, False)
         barcode_descriptions = copy.deepcopy(barcodes)
 
         # generate hamming dictionary for error correction
-        barcodes = resources_v2.generate_hamming_dict(barcodes)
+        barcodes = resources.generate_hamming_dict(barcodes)
 
         # process ab reads and look for barcode
         ab_process = []
@@ -653,7 +659,7 @@ Initializing pipeline...
                 pass
 
         # count the ab read umis
-        resources_v2.count_umis(ab_reads_merged, umi_counts_merged)
+        resources.count_umis(ab_reads_merged, umi_counts_merged)
 
     print '''
 ###################################################################################
@@ -675,7 +681,7 @@ Step 5: call valid cells using selected method
 '''
 
     # call valid cells using cell_caller function
-    valid_cells = cell_calling.call(barcode_dir, sample_basename, 'second_derivative', True)
+    valid_cells = cell_calling.call(barcode_dir, sample_basename, 'second_derivative', False)
 
     # create SingleCell objects for each valid cell
     cells = [resources.SingleCell(barcode,
@@ -774,6 +780,18 @@ Step 6: write valid cells from panel reads to separate fastq files
     call_variants_pool.join()
 
     ################################################################################
+
+    # delete temporary files, if selected
+    if fastq_cleanup:
+        for s in samples:
+            if os.path.isfile(s.panel_r1_temp):
+                os.remove(s.panel_r1_temp)
+            if os.path.isfile(s.panel_r2_temp):
+                os.remove(s.panel_r2_temp)
+            if os.path.isfile(s.ab_r1_temp):
+                os.remove(s.ab_r1_temp)
+            if os.path.isfile(s.ab_r2_temp):
+                os.remove(s.ab_r2_temp)
 
     print 'Pipeline complete!'
 
