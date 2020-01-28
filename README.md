@@ -21,8 +21,8 @@ The pipeline consists of two primary Python scripts, which must be run sequentia
 
 #### `mb_pipeline.py`
 
-The first script, `mb_pipeline.py` processes raw FASTQ files according to settings in a configuration file (see the provided example, `dabseq.cfg`). The script demultiplexes DNA panel amplicons and antibody tags into single cells, aligns panel reads to the human genome, and generates a GVCF file for each cell. For specific usage instructions and a list of arguments, use the `-h` option.
+The first script, `mb_pipeline.py`, processes raw FASTQ files according to settings in a configuration file (see the provided example, `dabseq.cfg`). The script demultiplexes DNA panel amplicons and antibody tags into single cells, aligns panel reads to the human genome, and generates a GVCF file for each cell. For specific usage instructions and a list of arguments, use the `-h` option.
 
 #### `genotype_cohort.py`
 
-The second script operates on the single-cell GVCF files produced by `mb_pipeline.py` for one or multiple experiments. The script imports GVCFs into a GenomicsDB database (GATK GenomicsDBImport) and calls genotypes (GATK GenotypeGVCFs) separately for each genomic interval in parallel.
+`genotype_cohort.py` operates on the single-cell GVCF files produced by `mb_pipeline.py` for one or multiple experiments. The script imports GVCFs into a GenomicsDB database (GATK GenomicsDBImport) and calls genotypes (GATK GenotypeGVCFs) separately for each genomic interval in parallel.
