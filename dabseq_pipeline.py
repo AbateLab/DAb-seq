@@ -21,22 +21,13 @@ from multiprocessing import Process
 import resources
 import cell_calling
 
-# option to enable slack messages
-slack_enabled = True
-slack_token_file = '/home/bdemaree/.slack_token'
-if slack_enabled:
-    from slackclient import SlackClient
-
-def slack_message(message, enabled=False, slack_token_file=None):
+def slack_message(message, enabled=False, slack_token=None):
     # for posting a notification to a slack channel
 
     if enabled:
 
-        with open(slack_token_file) as f:
-            token = f.readline().strip()
-
         channel = 'server-alerts'
-        sc = SlackClient(token)
+        sc = SlackClient(slack_token)
 
         sc.api_call('chat.postMessage',
                     channel=channel,
@@ -84,6 +75,7 @@ if __name__ == "__main__":
     # optional arguments
     parser.add_argument('--sample-name', default=None, type=str, help='sample name (required when in barcoding mode)')
     parser.add_argument('--chem', type=str, default='V2', choices=['V1', 'V2'], help='chemistry version (V1 or V2) (default: V2)')
+    parser.add_argument('--slack-token', type=str, default=None, help='option to provide slack token string')
     parser.add_argument('--dna-only', action='store_true', default=False, help='option to run dna panel pipeline only')
     parser.add_argument('--ab-only', action='store_true', default=False, help='option to run ab panel pipeline only')
     parser.add_argument('--ab-method', type=str, default='all', choices=['unique', 'all'], help='ab clustering method ("unique" or "all") (default: "all")')
@@ -97,6 +89,7 @@ if __name__ == "__main__":
     cfg_f = args.cfg_file
     sample_name = args.sample_name
     chem = args.chem
+    slack_token = args.slack_token
     clustering_method = args.ab_method
     dna_only = args.dna_only
     ab_only = args.ab_only
@@ -197,6 +190,14 @@ if __name__ == "__main__":
         if not os.path.exists(d):
             os.mkdir(d)
 
+    # option to enable slack messages
+    if slack_token is not None:
+        slack_enabled = True
+    else:
+        slack_enabled = False
+    if slack_enabled:
+        from slackclient import SlackClient
+
 ########################################################################################################################
 #                                                   BARCODING
 ########################################################################################################################
@@ -275,7 +276,7 @@ if __name__ == "__main__":
         start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
         slack_message('Barcoding pipeline started for sample %s at %s.' % (sample_name, start_time_fmt),
                       slack_enabled,
-                      slack_token_file)
+                      slack_token)
 
         print('''
 ####################################################################################
@@ -679,7 +680,7 @@ if __name__ == "__main__":
         start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
         slack_message('Genotyping pipeline started for cohort %s at %s.' % (cohort_name, start_time_fmt),
                       slack_enabled,
-                      slack_token_file)
+                      slack_token)
 
         print('''
 ####################################################################################
@@ -829,4 +830,4 @@ if __name__ == "__main__":
     elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
     slack_message('Pipeline complete for sample %s! Total elapsed time is %s.' % (sample_name, elapsed_time_fmt),
                   slack_enabled,
-                  slack_token_file)
+                  slack_token)
