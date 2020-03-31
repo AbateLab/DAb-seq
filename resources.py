@@ -5,15 +5,16 @@ ben demaree 7.9.2019
 
 functions required for the processing pipeline
 
+two classes are defined:
+* TapestriTube: variables and methods that operate on the level of a single Tapestri tube library
+* SingleCell: variables and methods that operate on the level of one cell barcode
+
 """
 
-from __future__ import division
 import os
 import os.path
 import csv
-from itertools import product, combinations, groupby
-from multiprocessing import Process, Queue
-import json
+from itertools import product, combinations, izip
 from collections import Counter
 import numpy as np
 import subprocess
@@ -28,11 +29,13 @@ sys.path.append(os.path.join(sys.path[0], 'umi_tools'))
 import Utilities as U
 import network as network
 
-class TapestriSample(object):
-    # class for storing metadata for each tapestri sample (one tube, run, etc...)
+# define classes
+
+class TapestriTube(object):
+    # class for storing metadata for each tapestri tube
 
     def __init__(self,
-                 sample_num,
+                 tube_num,
                  panel_r1,
                  panel_r2,
                  panel_r1_temp,
@@ -41,11 +44,10 @@ class TapestriSample(object):
                  ab_r2,
                  ab_r1_temp,
                  ab_r2_temp,
-                 panel_barcodes,
-                 ab_barcodes,
-                 ab_reads):
+                 ab_reads,
+                 umi_counts):
 
-        self.sample_num = sample_num            # number identifying sample (or tube)
+        self.tube_num = tube_num            # number identifying tube
 
         self.panel_r1 = panel_r1                # panel R1 fastq path
         self.panel_r2 = panel_r2                # panel R2 fastq path
@@ -57,167 +59,147 @@ class TapestriSample(object):
         self.ab_r1_temp = ab_r1_temp            # temp ab R1 fastq path
         self.ab_r2_temp = ab_r2_temp            # temp ab R2 fastq path
 
-        self.panel_barcodes = panel_barcodes    # file of cell barcodes for this sample (panel)
-        self.ab_barcodes = ab_barcodes          # file of cell barcodes for this sample (abs)
-
         self.ab_reads = ab_reads                # file containing filtered ab reads
-
-    def filter_valid_reads(self,
-                           r1_start,
-                           mb_barcodes,
-                           bar_ind_1,
-                           bar_ind_2,
-                           sample_type):
-        # filter r1 files to only keep reads with correct barcode structure in r1
-
-        assert sample_type == 'ab' or sample_type == 'panel', 'Sample type must be panel or ab!'
-
-        # set filenames according to sample type (panel or ab)
-        if sample_type == 'panel':
-            r1_in = self.panel_r1
-            barcode_json = self.panel_barcodes
-
-        else:
-            r1_in = self.ab_r1
-            barcode_json = self.ab_barcodes
-
-        cmd = 'python3 /usr/local/bin/cutadapt' \
-              ' -a r1_start=%s' \
-              ' -j 16 -O 6 -e 0.2 %s --quiet' \
-              % (r1_start,
-                 r1_in)
-
-        trim_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
-
-        read_id_dict = {}  # dict for storing read ids
-
-        # iterate through all Read 1 records
-        for line in trim_process.stdout:
-
-            # R1
-            header_1 = line.strip()  # header
-            id_1 = header_1.split(' ')[0][1:]  # read id
-            seq_1 = trim_process.stdout.next().strip()  # sequence string
-            trim_process.stdout.next()  # +
-            trim_process.stdout.next()  # qual
-
-            # find barcodes and check that they are a valid MB barcode
-            check = check_seq(seq_1, bar_ind_1, bar_ind_2, mb_barcodes)
-
-            if check == 'fail':
-                continue
-
-            else:
-                barcode = check[0] + check[1] + '-' + str(self.sample_num)
-                read_id_dict[id_1] = barcode
-
-        # export barcodes to json file
-        json_export(read_id_dict, barcode_json)
+        self.umi_counts = umi_counts            # file containing umi counts by barcode
 
     def barcode_reads(self,
                       r1_start,
                       r1_end,
                       r2_end,
+                      mb_barcodes,
+                      bar_ind_1,
+                      bar_ind_2,
                       r1_min_len,
                       r2_min_len,
-                      sample_type):
+                      library_type):
         # for valid reads, add barcode header to fastq file and trim
 
-        assert sample_type == 'ab' or sample_type == 'panel', 'Sample type must be panel or ab!'
+        assert library_type == 'ab' or library_type == 'panel', 'Library type must be panel or ab!'
 
-        # set filenames according to sample type (panel or ab)
-        if sample_type == 'panel':
+        # set filenames according to library type (panel or ab)
+        if library_type == 'panel':
+
             r1_in = self.panel_r1
             r2_in = self.panel_r2
 
             r1_out = open(self.panel_r1_temp, 'w')
             r2_out = open(self.panel_r2_temp, 'w')
 
-            barcode_json = self.panel_barcodes
+        elif library_type == 'ab':
 
-            # TODO make read 1 cutting parameter (-u 51) intelligent
-            # hard trimming is used to ensure entire cell barcode region is removed
-
-            # cutadapt cmd for panel (trim read before finding adapter)
-            cmd = 'python3 /usr/local/bin/cutadapt' \
-                  ' -a %s' \
-                  ' -A %s' \
-                  ' --interleaved -j 16 -u 60 -U 15 -n 3 -O 8 -m %s:%s -e 0.2 %s %s --quiet' \
-                  % (r1_end,
-                     r2_end,
-                     r1_min_len,
-                     r2_min_len,
-                     r1_in,
-                     r2_in)
-
-        elif sample_type == 'ab':
             r1_in = self.ab_r1
             r2_in = self.ab_r2
 
             r1_out = open(self.ab_r1_temp, 'w')
             r2_out = open(self.ab_r2_temp, 'w')
 
-            barcode_json = self.ab_barcodes
+        # trim 5' end of read and check barcode
+        bar_cmd = 'cutadapt -a %s -O 8 -e 0.2 %s -j 8 --quiet' % (r1_start,
+                                                                  r1_in)
+        bar_file = subprocess.Popen(bar_cmd, stdout=subprocess.PIPE, shell=True)
 
-            # cutadapt cmd for abs
-            cmd = 'python3 /usr/local/bin/cutadapt' \
-                  ' -g %s' \
-                  ' -a %s' \
-                  ' -A %s' \
-                  ' --interleaved -j 16 -n 3 -O 8 -m %s:%s -e 0.2 %s %s --quiet' \
-                  % (r1_start,
-                     r1_end,
-                     r2_end,
-                     r1_min_len,
-                     r2_min_len,
-                     r1_in,
-                     r2_in)
+        # hard trimming (55 bp off R1, 5 bp off R2) is used to ensure entire cell barcode region is removed
+        # barcode bases for V1 chemistry: 47 bp
+        # max barcode bases for V2 chemistry: 50 bp
 
-        # import json file of read barcodes
-        read_id_dict = json_import(barcode_json)
+        # trimmed reads output
+        trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -U 5 -n 2 %s %s --quiet' % (r1_end,
+                                                                                              r2_end,
+                                                                                              r1_in,
+                                                                                              r2_in)
+        trim_file = subprocess.Popen(trim_cmd, stdout=subprocess.PIPE, shell=True)
 
-        trim_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, shell=True)
+        total_reads = 0     # total count of all reads
+        invalid_reads = 0   # no valid barcode found
+        valid_reads = 0     # valid, barcoded read count
+        too_short = 0
 
-        bar_count = 0  # total count of all barcodes
+        # iterate through info file (barcodes) and trim file (reads)
+        for bar_line, trim_line in izip(bar_file.stdout, trim_file.stdout):
 
-        # iterate through all Read 1 records
-        for line in trim_process.stdout:
+            assert bar_line.strip() == trim_line.strip(), 'Cluster IDs do not match!'
 
-            # R1
-            header_1 = line.strip()
-            id_1 = header_1.split(' ')[0][1:]
-            seq_1 = trim_process.stdout.next().strip()
-            trim_process.stdout.next()
-            qual_1 = trim_process.stdout.next().strip()
+            total_reads += 1
 
-            # R2
-            header_2 = trim_process.stdout.next().strip()
-            id_2 = header_2.split(' ')[0][1:]
-            seq_2 = trim_process.stdout.next().strip()
-            trim_process.stdout.next()
-            qual_2 = trim_process.stdout.next().strip()
+            # extract trimmed barcode region
+            bar_seq = bar_file.stdout.next().strip()
 
-            assert id_1 == id_2, 'Read IDs do not match! Check input FASTQ files.'
+            # if trimmed adapter is too long - no barcode present
+            if len(bar_seq) > 52:
 
-            try:
-                cell_barcode = read_id_dict[id_1]
-            except KeyError:
+                invalid_reads += 1
+
+                # advance through files
+                for i in range(7):
+                    trim_file.stdout.next()
+                for i in range(2):
+                    bar_file.stdout.next()
+
                 continue
 
-            # if a valid read
-            # add barcode to header id
-            id = '@' + id_1 + '_' + cell_barcode
+            # contains valid adapter
+            else:
+                # find barcodes and check that they are a valid MB barcode
+                check = check_seq(bar_seq, bar_ind_1, bar_ind_2, mb_barcodes)
 
-            # write to output fastq files
-            r1_out.write('%s\n%s\n+\n%s\n' % (id, seq_1, qual_1))
-            r2_out.write('%s\n%s\n+\n%s\n' % (id, seq_2, qual_2))
+                # not a valid barcode
+                if check == 'fail':
 
-            bar_count += 1
+                    invalid_reads += 1
 
-        print '%d total valid trimmed pairs saved to file.' % bar_count
+                    # advance through files
+                    for i in range(7):
+                        trim_file.stdout.next()
+                    for i in range(2):
+                        bar_file.stdout.next()
 
-        r1_out.close()
-        r2_out.close()
+                    continue
+
+                # valid barcode
+                else:
+
+                    # adavance through barcode file
+                    for i in range(2):
+                        bar_file.stdout.next()
+
+                    barcode = check[0] + check[1] + '-' + str(self.tube_num)
+
+                    # R1 from trimmed file
+                    header_1 = trim_line.strip()
+                    id_1 = header_1.split(' ')[0][1:]
+                    seq_1 = trim_file.stdout.next().strip()
+                    trim_file.stdout.next()
+                    qual_1 = trim_file.stdout.next().strip()
+
+                    # R2 from trimmed file
+                    header_2 = trim_file.stdout.next().strip()
+                    id_2 = header_2.split(' ')[0][1:]
+
+                    assert id_1 == id_2, 'Cluster IDs in interleaved input do not match!'
+
+                    seq_2 = trim_file.stdout.next().strip()
+                    trim_file.stdout.next()
+                    qual_2 = trim_file.stdout.next().strip()
+
+                    # check reads for length
+                    if len(seq_1) < r1_min_len or len(seq_2) < r2_min_len:
+                        too_short += 1
+                        continue
+
+                    # add barcoded headers and reads to file
+                    id = '@' + id_1 + '_' + barcode
+
+                    # write to output fastq files
+                    r1_out.write('%s\n%s\n+\n%s\n' % (id, seq_1, qual_1))
+                    r2_out.write('%s\n%s\n+\n%s\n' % (id, seq_2, qual_2))
+
+                    valid_reads += 1
+
+                    # print counter
+                    if valid_reads % 1e6 == 0:
+                        print('Tube %d-%s: %d valid trimmed pairs saved to file.' % (self.tube_num,
+                                                                                       library_type,
+                                                                                       valid_reads))
 
     def process_abs(self,
                     ab_barcodes,
@@ -228,15 +210,16 @@ class TapestriSample(object):
                     min_umi_qual):
         # extract ab barcodes and umis from raw ab reads
 
-        # create dict for storing passed ab reads
-        passed_ab_reads = {}
-        passed_count = 0
+        # write passed ab reads to file
+        ab_reads_file = open(self.ab_reads, 'w')
 
         # use cutadapt to select reads with correct structure
-        ab_cmd = 'python3 /usr/local/bin/cutadapt -j 24 %s -O 12 -e 0.2 -n 2 %s --quiet ' \
-                 '--discard-untrimmed' % (ab_handles, self.ab_r2_temp)
+        ab_cmd = 'cutadapt -j 8 %s -O 12 -e 0.2 -n 2 %s --quiet --discard-untrimmed' % (ab_handles,
+                                                                                         self.ab_r2_temp)
 
         ab_process = subprocess.Popen(ab_cmd, stdout=subprocess.PIPE, shell=True)
+
+        valid_ab_reads = 0
 
         # iterate through ab reads with correct adapters
         for line in ab_process.stdout:
@@ -264,19 +247,91 @@ class TapestriSample(object):
             if not all(q >= min_umi_qual for q in umi_qual):
                 continue
 
-            # if a read passes all filters, add it to a dictionary
-            passed_count += 1
-            passed_ab_reads[passed_count] = {}
-            passed_ab_reads[passed_count]['cell barcode'] = cell_barcode
-            passed_ab_reads[passed_count]['ab description'] = barcode_descriptions[bar]
-            passed_ab_reads[passed_count]['raw umi'] = umi
+            # if a read passes all filters, write it to file
+            valid_ab_reads += 1
+            ab_reads_file.write(cell_barcode + '\t')
+            ab_reads_file.write(barcode_descriptions[bar] + '\t')
+            ab_reads_file.write(umi + '\n')
 
-        # write passed ab reads to tsv file
-        with(open(self.ab_reads, 'w')) as f:
-            for ab in passed_ab_reads:
-                f.write(passed_ab_reads[ab]['cell barcode'] + '\t')
-                f.write(passed_ab_reads[ab]['ab description'] + '\t')
-                f.write(passed_ab_reads[ab]['raw umi'] + '\n')
+        ab_reads_file.close()
+
+    def count_umis(self, clustering_method):
+        # count umis using selected clustering methods
+        # assumes ab reads file is sorted
+
+        # extract ab umis from ab reads file
+        ab_reads = open(self.ab_reads, 'r')
+
+        # write to umi counts file
+        umi_counts = open(self.umi_counts, 'w')
+        umi_counts.write('cell_barcode\tab_description\traw\tunique')
+        if clustering_method == 'all':
+            umi_counts.write('\tadjacency\tdirectional\tpercentile\tcluster')
+
+        # initialize with group id (cell barcode + ab) and group umis
+
+        group_id_prev = ''
+        group_umis = []
+        first_line = True
+
+        for line in ab_reads:
+
+            group_id_curr = line.split('\t')[:2]
+            umi = line.strip().split('\t')[2]
+
+            # still in same umi group
+            if group_id_curr == group_id_prev or first_line:
+                group_umis.append(umi)
+                first_line = False
+
+            # new umi group
+            else:
+                # cluster umis from previous group
+                counts = self.umi_tools_cluster(group_umis, clustering_method)
+
+                # write umi count to file
+                self.write_umis(counts, group_id_prev, umi_counts, clustering_method)
+
+                # reset group umis
+                group_umis = [umi]
+
+            group_id_prev = group_id_curr
+
+        # process final group
+        counts = self.umi_tools_cluster(group_umis, clustering_method)
+        self.write_umis(counts, group_id_prev, umi_counts, clustering_method)
+
+    @staticmethod
+    def umi_tools_cluster(group_umis, clustering_method):
+        # cluster a umi group with umi-tools
+
+        umi_counter = Counter(group_umis)
+
+        # set up UMIClusterer functor with parameters specific to specified method
+        # choose method = 'all' for all available methods
+
+        processor = network.UMIClusterer()  # initialize UMIclusterer
+        clusters = processor(umi_counter.keys(),
+                             umi_counter,
+                             threshold=1,
+                             cluster_method=clustering_method)
+        counts = {k: str(len(v)) for k, v in clusters.items()}
+
+        counts['raw'] = str(len(group_umis))
+
+        return counts
+
+    @staticmethod
+    def write_umis(counts, group_id, umi_counts_handle, clustering_method):
+        # write a umi group to file
+
+        umi_counts_handle.write('\n' + '\t'.join(group_id) + '\t' + counts['raw'] + '\t' + counts['unique'])
+
+        if clustering_method == 'all':
+            umi_counts_handle.write('\t' + counts['adjacency']
+                                    + '\t' + counts['directional']
+                                    + '\t' + counts['percentile']
+                                    + '\t' + counts['cluster'])
 
 class SingleCell(object):
     # class for storing metadata for each single cell file
@@ -326,7 +381,6 @@ class SingleCell(object):
                           fasta,
                           self.flt3_vcf)
 
-        # process = subprocess.Popen(variants_cmd, shell=True)
         subprocess.call(flt3_cmd, shell=True)
 
     def call_variants(self, fasta, interval_file):
@@ -345,18 +399,17 @@ class SingleCell(object):
                           self.vcf,
                           interval_file)
 
-        # process = subprocess.Popen(variants_cmd, shell=True)
         subprocess.call(variants_cmd, shell=True)
 
-def count_alignments(r1_files, amplicon_file, fasta_file, tsv, dir):
-    # align and count r1 reads for all barcodes, and save to tsv file
+def count_alignments(r1_files, amplicon_file, fasta_file, tsv, aln_stats_file, temp_dir):
+    # align and count r1 reads for all sample barcodes, and save to tsv file
 
     # get fasta file from human genome for this interval
-    insert_fasta = dir + 'amplicons.fasta'
+    insert_fasta = temp_dir + 'amplicons.fasta'
     subprocess.call('bedtools getfasta -fi %s -bed %s -fo %s -name' % (fasta_file, amplicon_file, insert_fasta), shell=True)
 
     # build bt2 index for this fasta
-    insert_bt2 = dir + 'inserts'
+    insert_bt2 = temp_dir + 'inserts'
     subprocess.call('bowtie2-build %s %s' % (insert_fasta, insert_bt2), shell=True)
 
     # extract names of reference sequences
@@ -367,14 +420,15 @@ def count_alignments(r1_files, amplicon_file, fasta_file, tsv, dir):
     refs.sort()
     refs_dict = dict(zip(refs, [0] * len(refs)))
 
-    # amplicon dict (key: cell barcode, value: list of amplicon counts)
+    # amplicon dict (key: cell barcode; value: list of amplicon counts)
     amplicons = {}
 
     # align reads with bowtie2
-    bt2_input = ' -U '.join(r1_files)
     # read filters: read mapped, mapq >= 3, primary alignment
     # this filter is the same as used for single-cell mapping
-    bt2_cmd = 'bowtie2 -p 24 -x %s -U %s | samtools view -q 3 -F 4 -F 0X0100' % (insert_bt2, bt2_input)
+    bt2_cmd = 'bowtie2 -p 24 -x %s -U %s 2> %s | samtools view -q 3 -F 4 -F 0X0100' % (insert_bt2,
+                                                                                       ' -U '.join(r1_files),
+                                                                                       aln_stats_file)
     bt2_align = subprocess.Popen(bt2_cmd, stdout=subprocess.PIPE, shell=True)
 
     # iterate through all reads
@@ -400,35 +454,6 @@ def count_alignments(r1_files, amplicon_file, fasta_file, tsv, dir):
         for c in amplicons:
             f.write(c + '\t' + '\t'.join([str(amplicons[c][r]) for r in refs]) + '\n')
 
-def json_import(filename):
-    # imports json data into python. If json file does not exist, returns empty {}
-
-    if not os.path.exists(filename):
-        json_obj = {}
-    else:
-        with open(filename) as f:
-            json_obj = json.load(f)
-
-    return json_obj
-
-def json_export(json_obj, filename, overwrite=True, update=False):
-    # exports a json object to file. If overwrite is off, writing will fail. Can also update an existing json
-
-    if os.path.exists(filename) and not overwrite:
-        print 'File exists. Will not overwrite. Exiting...'
-        raise SystemExit
-
-    elif update:
-        if not os.path.exists(filename):
-            old_json = {}
-        else:
-            old_json = json_import(filename)
-
-        json_obj.update(old_json)
-
-    with open(filename, 'w') as out:
-        json.dump(json_obj, out)
-
 def load_barcodes(barcode_file, max_dist, check_barcodes=True):
     # loads barcodes from csv and checks all pairwise distances to ensure error correction will work
     # returns a dictionary of barcodes with their descriptions
@@ -445,7 +470,7 @@ def load_barcodes(barcode_file, max_dist, check_barcodes=True):
         # check all barcodes have same length
         lengths = map(len, barcodes.keys())
         if len(set(lengths)) != 1:
-            print 'Barcodes must all be same length! Exiting...'
+            print('Barcodes must all be same length! Exiting...')
             raise SystemExit
 
         # check pairwise hamming distances
@@ -453,8 +478,8 @@ def load_barcodes(barcode_file, max_dist, check_barcodes=True):
         pairs = list(combinations(barcodes.keys(), 2))
         for pair in pairs:
             if hd(pair[0], pair[1]) < dist_req:
-                print 'Error: The edit distance between barcodes %s and %s is less than %d.\n' \
-                      'An error correction of %d bases will not work.' % (pair[0], pair[1], dist_req, max_dist)
+                print('Error: The edit distance between barcodes %s and %s is less than %d.\n'
+                      'An error correction of %d bases will not work.' % (pair[0], pair[1], dist_req, max_dist))
 
     return barcodes
 
@@ -531,155 +556,39 @@ def correct_barcode(barcodes, raw_barcode):
     # if correction fails
     return 'invalid'
 
-def count_umis(ab_reads_file, umi_counts_file, n_procs=24):
-    # count umis using selected clustering methods
+def db_import(db_path, sample_map_path, interval):
+    # import single-cell gvcfs for one interval
 
-    def extract_umis(ab_reads_file):
-        # extracts lists of umis from ab reads tsv file and groups by cell and ab tag
+    # make call to gatk for genomics db import
+    # batch size is number of cells
+    db_import_cmd = 'gatk --java-options "-Xmx4g" GenomicsDBImport ' \
+                    '--genomicsdb-workspace-path %s ' \
+                    '--batch-size 50 ' \
+                    '--reader-threads 2 ' \
+                    '--validate-sample-name-map true ' \
+                    '-L %s ' \
+                    '--sample-name-map %s' % (db_path,
+                                              interval,
+                                              sample_map_path)
 
-        # store ab reads in list of lists
-        # col 1: cell_barcode, col 2: ab_barcode_description, col 3: raw_umi
-        ab_reads = []
-        with(open(ab_reads_file, 'r')) as f:
-            for line in f:
-                ab_reads.append(line.strip().split('\t'))
+    process = subprocess.call(db_import_cmd, shell=True)
 
-        # concatenate cell barcode and ab barcode
-        ab_reads = [['+'.join(r[:2]), r[2]] for r in ab_reads]
-        ab_reads.sort()   # sort list by first element
+def joint_genotype(db_path, fasta, interval, output_vcf):
+    # perform joint genotyping across a cohort using data from a genomicsdb store
 
-        group_ids = []  # cell barcode + ab barcode defining a umi group
-        umi_groups = []  # list of list of umis for each group
+    # make call to gatk for genotyping
+    genotype_cmd = 'gatk --java-options "-Xmx4g" GenotypeGVCFs ' \
+                   '-V %s ' \
+                   '-R %s ' \
+                   '-L %s ' \
+                   '-O %s ' \
+                   '--include-non-variant-sites' \
+                   % (db_path,
+                      fasta,
+                      interval,
+                      output_vcf)
 
-        # group by ab tag barcode (first element in list)
-        keyfunc = lambda x: x[0]
-
-        for k, g in groupby(ab_reads, keyfunc):
-            group_ids += [k]  # add ab tag
-            umi_groups += [[i[1] for i in list(g)]]  # add umi group
-
-        return group_ids, umi_groups
-
-    def cluster_umis(umi_dict, method='all'):
-        # clusters the umis using the specified method (or all)
-        # uses functions from umi-tools paper (Genome Research, 2017)
-
-        # split umi dict into umis (keys) and counts
-        umis = umi_dict.keys()
-        counts = umi_dict
-
-        # set up UMIClusterer functor with parameters specific to specified method
-        # choose method = 'all' for all available methods
-        # otherwise provide methods as a list of methods
-        processor = network.UMIClusterer()  # initialize UMIclusterer
-
-        # cluster the umis
-        clusters = processor(
-            umis,
-            counts,
-            threshold=1,
-            cluster_method=method)
-
-        return clusters
-
-    def mp_umi_cluster(group_ids, umis, n_procs, method='all'):
-        # multiprocess implementation of umi-tools clustering algorithms
-        # assigns one umi group to one process, processing n_procs groups in parallel
-
-        # make dicts of all umi groups and an index
-        umi_groups = dict(zip(group_ids, umis))
-        umi_groups_idx = dict(zip(range(len(group_ids)), group_ids))
-
-        def worker(out_q, proc_id):
-            # the function that sends umi groups to the umi-tools clustering functions
-
-            for i in umi_groups_idx.keys():
-                if i % n_procs == proc_id:  # delegate entries to each process
-                    umi_counter = Counter(umi_groups[umi_groups_idx[i]])
-                    clusters = cluster_umis(umi_counter, method=method)
-                    clusters_by_group = {umi_groups_idx[i]: clusters}
-
-                    out_q.put(clusters_by_group)
-
-                else:
-                    continue
-
-            sys.stdout.flush()
-
-        # each process will get random subset of umi groups
-        out_q = Queue()
-        procs = []
-
-        for i in range(n_procs):
-            p = Process(
-                target=worker,
-                args=(out_q, i))
-            procs.append(p)
-            p.start()
-
-        # collect all results into a single output dict
-        out_dict = {}
-
-        while True:
-            out_dict.update(out_q.get())
-            if len(out_dict) == len(group_ids):
-                break
-
-        # wait for all worker processes to finish
-        for p in procs:
-            p.join()
-
-        return out_dict
-
-    def to_counts(groups_by_method):
-        # counts umis for each method in umi dictionary
-
-        counts_by_method = {}
-
-        for barcode in groups_by_method:
-            counts_by_method[barcode] = {}
-
-            for method in groups_by_method[barcode]:
-                counts_by_method[barcode][method] = len(groups_by_method[barcode][method])
-
-        return counts_by_method
-
-    # extract ab reads from tsv file
-    group_ids, umi_groups = extract_umis(ab_reads_file)
-    raw_counts_dict = dict(zip(group_ids, [len(l) for l in umi_groups]))
-
-    # number of threads should be less than or equal to number of umi groups
-    if n_procs > len(group_ids):
-        n_procs = len(group_ids)
-
-    # if no UMI groups found, quit program
-    if len(group_ids) == 0:
-        print 'No UMI groups found! Now exiting...\n'
-        raise SystemExit
-
-    print 'Found %s UMI groups. Now clustering using %d threads.' % (len(group_ids), n_procs)
-
-    # send groups to multiprocessor handler and clustering functions
-    # groups_by_method = {barcode1: {'adjacency': [[umi1],[umi1, umi2]], 'directional': ...}}
-
-    groups_by_method = mp_umi_cluster(group_ids, umi_groups, n_procs, method='all')
-
-    # count number of umis in each barcode for each method
-    # counts_by_method = {barcode1: {'adjacency': 2, 'directional': ...}}
-    counts_by_method = to_counts(groups_by_method)
-
-    # save the counts to tsv file
-    count_methods = ['unique', 'percentile', 'cluster', 'adjacency']
-    with(open(umi_counts_file, 'w')) as f:
-        f.write('cell_barcode\tab_description\traw\t' + '\t'.join(count_methods) + '\n')
-        for group in counts_by_method:
-            f.write('\t'.join(group.split('+')) + '\t' + str(raw_counts_dict[group]) + '\t')
-            f.write('\t'.join([str(counts_by_method[group][m]) for m in count_methods]) + '\n')
-
-    # gzip the ab reads file to save space
-    subprocess.call('gzip -f %s' % ab_reads_file, shell=True)
-
-    print 'All UMIs grouped and saved to %s.\n' % umi_counts_file
+    process = subprocess.call(genotype_cmd, shell=True)
 
 def left_align_trim(human_fasta_file, geno_vcf, split_vcf):
     # uses bcftools to split multiallelics, left-align, and trim
@@ -754,8 +663,8 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
     # assemble and save variant annotations to file
     variants_table = pd.DataFrame(data=names, columns=['Name'])
 
-    # cosmic id
-    variants_table['COSMIC_ID'] = vcf['variants/ID']
+    # clinvar variation id
+    variants_table['ClinVar_Variation_ID'] = vcf['variants/ID']
 
     # snpeff columns
     ANN_columns = [c for c in list(vcf) if '/ANN' in c]
@@ -849,3 +758,239 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
         f.create_dataset('RD', data=RD, dtype='i2', compression='gzip')
         f.create_dataset('VARIANTS', data=names, compression='gzip')
         f.create_dataset('CELL_BARCODES', data=barcodes, compression='gzip')
+
+
+def file_summary(tubes, cfg_file, summary_file, header_file=False):
+    # displays sample files and class variables
+
+    input_msg = '''
+####################################################################################
+# INPUT FILE SUMMARY
+####################################################################################
+
+'''
+    print(input_msg)
+
+    f = open(summary_file, 'w')
+
+    if header_file:
+        with open(header_file, 'r') as h:
+            for line in h:
+                f.write(line)
+
+    f.write(input_msg)
+
+    # write file list to run summary
+
+    for tube in tubes:
+
+        s = vars(tube)
+
+        for item in s:
+            if type(s[item]) is list:
+                to_write = item + ': ' + ', '.join(s[item]) + '\n'
+                print(to_write.strip())
+                f.write(to_write)
+
+            else:
+                to_write = item + ': ' + str(s[item]) + '\n'
+                print(to_write.strip())
+                f.write(to_write)
+
+        print('')
+        f.write('\n')
+
+    # write config file to run summary
+
+    config_msg = '''
+####################################################################################
+# CONFIG FILE
+####################################################################################
+
+'''
+    print(config_msg)
+
+    f.write(config_msg)
+
+    with open(cfg_file, 'r') as cfg:
+
+        for line in cfg:
+
+            try:
+                if line.split(' ')[1][0] == '=' and line[0] != '#':
+                    setting = line.split(' ')[0]
+                    setting_value = globals()[setting]
+                    print(setting + ': ' + str(setting_value))
+                    f.write(setting + ': ' + str(setting_value) + '\n')
+
+                else:
+                    print(line.strip())
+                    f.write(line)
+            except:
+                print(line.strip())
+                f.write(line)
+    f.close()
+
+def get_fastq_names(path_to_fastq, paired=True):
+    # gets fastq filenames in a given directory and runs some simple checks
+    # assumes files are compressed with .gz extensions
+
+    R1_files = []
+    R2_files = []
+
+    for file in os.listdir(path_to_fastq):
+
+        if file.endswith('.fastq.gz'):
+            R = file.split('_')[-2]  # R1 or R2
+
+            if R == 'R1':
+                R1_files += [path_to_fastq + file]
+
+            elif R == 'R2' and paired:
+                R2_files += [path_to_fastq + file]
+
+            else:
+                print('Unexpected filename structure. Exiting...')
+                raise SystemExit
+
+    if len(R1_files) != len(R2_files) and paired:
+        print('Unpaired FASTQ files exist! Check input files.')
+        raise SystemExit
+
+    R1_files.sort()
+    R2_files.sort()
+
+    return R1_files, R2_files
+
+def generate_sample(R1_files, R2_files, dna_only, ab_only, sample_name, temp_dir, ab_dir):
+    # store filenames in TapestriTube objects
+
+    tubes = []        # list of TapestriTube objects
+
+    # for experiments with only DNA panels
+    if dna_only:
+
+        for i in range(0, len(R1_files)):
+            # assign filenames to sample types
+            # note: using alphabetization pattern which may not exist in future
+
+            tube_num = i + 1
+
+            # dna panel
+
+            panel_r1 = R1_files[i]
+            panel_r2 = R2_files[i]
+
+            # set file locations
+
+            panel_r1_temp = temp_dir + panel_r1.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+            panel_r2_temp = temp_dir + panel_r2.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+
+            # antibodies - set filenames to empty string
+
+            ab_r1 = ''
+            ab_r2 = ''
+
+            ab_r1_temp = ''
+            ab_r2_temp = ''
+
+            ab_reads = ''
+            umi_counts = ''
+
+            tubes.append(TapestriTube(tube_num,
+                                      panel_r1,
+                                      panel_r2,
+                                      panel_r1_temp,
+                                      panel_r2_temp,
+                                      ab_r1,
+                                      ab_r2,
+                                      ab_r1_temp,
+                                      ab_r2_temp,
+                                      ab_reads,
+                                      umi_counts))
+
+    # for experiments with only Ab panels
+    elif ab_only:
+
+        for i in range(0, len(R1_files)):
+            # assign filenames to sample types
+            # note: using alphabetization pattern which may not exist in future
+
+            tube_num = i + 1
+
+            # dna panel - set files to empty strings
+
+            panel_r1 = ''
+            panel_r2 = ''
+
+            # set file locations
+
+            panel_r1_temp = ''
+            panel_r2_temp = ''
+
+            # antibodies
+
+            ab_r1 = R1_files[i]
+            ab_r2 = R2_files[i]
+
+            ab_r1_temp = temp_dir + ab_r1.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+            ab_r2_temp = temp_dir + ab_r2.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+
+            ab_reads = ab_dir + sample_name + '-' + str(tube_num) + '.ab_reads.tsv'
+            umi_counts = ab_dir + sample_name + '-' + str(tube_num) + '.umi_counts.tsv'
+
+            tubes.append(TapestriTube(tube_num,
+                                      panel_r1,
+                                      panel_r2,
+                                      panel_r1_temp,
+                                      panel_r2_temp,
+                                      ab_r1,
+                                      ab_r2,
+                                      ab_r1_temp,
+                                      ab_r2_temp,
+                                      ab_reads,
+                                      umi_counts))
+
+    # for experiments with antibody and panel data
+    else:
+
+        for i in range(0, len(R1_files) / 2):
+            # assign filenames to sample types
+            # note: using alphabetization pattern which may not exist in future
+
+            tube_num = i + 1
+
+            # dna panel
+
+            panel_r1 = R1_files[i + len(R1_files) / 2]
+            panel_r2 = R2_files[i + len(R1_files) / 2]
+
+            # set file locations
+
+            panel_r1_temp = temp_dir + panel_r1.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+            panel_r2_temp = temp_dir + panel_r2.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+
+            # antibodies
+
+            ab_r1 = R1_files[i]
+            ab_r2 = R2_files[i]
+
+            ab_r1_temp = temp_dir + ab_r1.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+            ab_r2_temp = temp_dir + ab_r2.split('.fastq.gz')[0].split('/')[-1] + '.temp.fastq'
+
+            ab_reads = ab_dir + sample_name + '-' + str(tube_num) + '.ab_reads.tsv'
+            umi_counts = ab_dir + sample_name + '-' + str(tube_num) + '.umi_counts.tsv'
+
+            tubes.append(TapestriTube(tube_num,
+                                      panel_r1,
+                                      panel_r2,
+                                      panel_r1_temp,
+                                      panel_r2_temp,
+                                      ab_r1,
+                                      ab_r2,
+                                      ab_r1_temp,
+                                      ab_r2_temp,
+                                      ab_reads,
+                                      umi_counts))
+
+    return tubes
