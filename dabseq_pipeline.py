@@ -825,9 +825,20 @@ if __name__ == "__main__":
 
     print('Pipeline complete!\n')
 
-    # send slack notification
-    elapsed_time = time.time() - start_time
-    elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
-    slack_message('Pipeline complete for sample %s! Total elapsed time is %s.' % (sample_name, elapsed_time_fmt),
-                  slack_enabled,
-                  slack_token)
+    if pipeline_mode == 'barcode':
+
+        # send slack notification
+        elapsed_time = time.time() - start_time
+        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+        slack_message('Barcoding pipeline complete for sample %s! Total elapsed time is %s.' % (sample_name, elapsed_time_fmt),
+                      slack_enabled,
+                      slack_token)
+
+    elif pipeline_mode == 'genotype':
+
+        # send slack notification
+        elapsed_time = time.time() - start_time
+        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+        slack_message('Genotyping pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name, elapsed_time_fmt),
+                      slack_enabled,
+                      slack_token)

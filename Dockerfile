@@ -14,12 +14,12 @@ RUN apt-get install -y libncurses5-dev
 RUN apt-get install -y zlib1g-dev
 RUN apt-get install -y libbz2-dev
 RUN apt-get install -y liblzma-dev
+RUN apt-get install -y libcurl4-openssl-dev
 RUN apt-get install -y unzip
 RUN apt-get install -y git
 RUN apt-get install -y default-jdk
 
 ### install bioinformatics programs
-
 WORKDIR /dabseq/programs
 
 # htslib
@@ -70,6 +70,7 @@ RUN mkdir bedtools
 WORKDIR /dabseq/programs/bedtools
 RUN wget -q --show-progress --progress=bar:force:noscroll https://github.com/arq5x/bedtools2/releases/download/v2.28.0/bedtools
 ENV PATH "$PATH:/dabseq/programs/bedtools"
+RUN chmod 777 /dabseq/programs/bedtools/bedtools
 
 # bbmap
 WORKDIR /dabseq/programs
@@ -89,7 +90,6 @@ ENV PATH "$PATH:/dabseq/programs/snpEff"
 ENV PATH "$PATH:/dabseq/programs/snpEff/scripts"
 
 ### download genome reference files
-
 WORKDIR /dabseq/references
 
 # get clinvar db
@@ -117,25 +117,16 @@ RUN pip install scikit-allel
 RUN pip install h5py
 RUN pip install future
 RUN pip install matplotlib
+RUN pip install slackclient
 
 ### get dab-seq private repo files
-
-# run before building: export SSH_PRIVATE_KEY="$(cat /home/bdemaree/.ssh/dab_seq_key)"
-
+# before building: export SSH_PRIVATE_KEY="$(cat /home/bdemaree/.ssh/dab_seq_key)"
 ARG SSH_PRIVATE_KEY
 RUN mkdir /root/.ssh/
 RUN echo "${SSH_PRIVATE_KEY}" > /root/.ssh/id_rsa
 RUN chmod 400 /root/.ssh/id_rsa
-
-# add domain to known hosts
 RUN touch /root/.ssh/known_hosts
 RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 WORKDIR /dabseq/pipeline
 RUN git clone git@github.com:AbateLab/DAb-seq
-#ENV PATH "$PATH:/dabseq/pipeline/DAb-seq"
-#RUN echo $PATH
-#ENV PYTHONPATH "$PYTHONPATH:/dabseq/pipeline/DAb-seq"
-RUN python --version
-RUN python /dabseq/pipeline/DAb-seq/mb_pipeline.py -h
-
-
+ENTRYPOINT ["python", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
