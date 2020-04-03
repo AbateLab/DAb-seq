@@ -68,18 +68,28 @@ if __name__ == "__main__":
     ''', formatter_class=argparse.RawTextHelpFormatter)
 
     # required arguments
-    parser.add_argument('cohort_name', type=str, help='cohort name')
-    parser.add_argument('mode', type=str, choices=['barcode', 'genotype'], help='pipeline mode ("barcode" or "genotype")')
-    parser.add_argument('cfg_file', type=str, help='config filename')
+    parser.add_argument('cohort_name', type=str,
+                        help='cohort name')
+    parser.add_argument('mode', type=str, choices=['barcode', 'genotype'],
+                        help='pipeline mode ("barcode" or "genotype")')
+    parser.add_argument('cfg_file', type=str,
+                        help='config filename')
 
     # optional arguments
-    parser.add_argument('--sample-name', default=None, type=str, help='sample name (required when in barcoding mode)')
-    parser.add_argument('--chem', type=str, default='V2', choices=['V1', 'V2'], help='chemistry version (V1 or V2) (default: V2)')
-    parser.add_argument('--slack-token', type=str, default=None, help='option to provide slack token string')
-    parser.add_argument('--dna-only', action='store_true', default=False, help='option to run dna panel pipeline only')
-    parser.add_argument('--ab-only', action='store_true', default=False, help='option to run ab panel pipeline only')
-    parser.add_argument('--ab-method', type=str, default='all', choices=['unique', 'all'], help='ab clustering method ("unique" or "all") (default: "all")')
-    parser.add_argument('--skip-flt3', action='store_true', default=False, help='option to skip FLT3-ITD calling')
+    parser.add_argument('--sample-name', default=None, type=str,
+                        help='sample name (required when in barcoding mode)')
+    parser.add_argument('--chem', type=str, default='V2', choices=['V1', 'V2'],
+                        help='chemistry version (V1 or V2) (default: V2)')
+    parser.add_argument('--slack-token', type=str, default=None,
+                        help='option to provide slack token string')
+    parser.add_argument('--dna-only', action='store_true', default=False,
+                        help='option to run dna panel pipeline only')
+    parser.add_argument('--ab-only', action='store_true', default=False,
+                        help='option to run ab panel pipeline only')
+    parser.add_argument('--ab-method', type=str, default='all', choices=['unique', 'all'],
+                        help='ab clustering method ("unique" or "all") (default: "all")')
+    parser.add_argument('--skip-flt3', action='store_true', default=False,
+                        help='option to skip FLT3-ITD calling')
 
     # parse arguments
     args = parser.parse_args()
@@ -758,6 +768,12 @@ if __name__ == "__main__":
         # use clinvar database
         resources.bcftools_annotate(clinvar_vcf_file, snpeff_annot_vcf, '-c INFO', annot_vcf)
 
+        print('''
+####################################################################################
+# export genotyping calls to compressed HDF5 file
+####################################################################################
+''')
+
         # convert vcf to variant matrix in hdf5 format
 
         # combine flt3 itd vcf files from all samples
@@ -794,7 +810,7 @@ if __name__ == "__main__":
         # no flt3 itd calling
         else:
             resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
-    
+
         # compress the final annotated vcf to reduce size
         subprocess.call('pigz -p 8 -f %s' % annot_vcf, shell=True)
 
@@ -803,7 +819,7 @@ if __name__ == "__main__":
     # delete temporary files, if selected
     if file_cleanup:
 
-        # remove temp files from barcoding mode
+        # remove temp folder from barcoding mode
         if pipeline_mode == 'barcode':
             try:
                 shutil.rmtree(temp_dir)
@@ -823,13 +839,20 @@ if __name__ == "__main__":
             except OSError:
                 pass
 
+            # remove single-interval vcfs and dbs
+            try:
+                shutil.rmtree(db_dir)
+                shutil.rmtree(vcf_dir)
+            except OSError:
+                pass
+
     print('Pipeline complete!\n')
 
     if pipeline_mode == 'barcode':
 
         # send slack notification
         elapsed_time = time.time() - start_time
-        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.localtime(elapsed_time)))
         slack_message('Barcoding pipeline complete for sample %s! Total elapsed time is %s.' % (sample_name, elapsed_time_fmt),
                       slack_enabled,
                       slack_token)
@@ -838,7 +861,7 @@ if __name__ == "__main__":
 
         # send slack notification
         elapsed_time = time.time() - start_time
-        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.localtime(elapsed_time)))
         slack_message('Genotyping pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name, elapsed_time_fmt),
                       slack_enabled,
                       slack_token)
