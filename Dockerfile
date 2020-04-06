@@ -88,6 +88,8 @@ RUN wget -q --show-progress --progress=bar:force:noscroll http://sourceforge.net
 RUN unzip snpEff_latest_core.zip
 ENV PATH "$PATH:/dabseq/programs/snpEff"
 ENV PATH "$PATH:/dabseq/programs/snpEff/scripts"
+# install snpEff database for hg19
+RUN snpEff download hg19
 
 ### download genome reference files
 WORKDIR /dabseq/references
@@ -134,6 +136,3 @@ ENTRYPOINT ["python", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
 # set input directories to fully open - so any user can write
 RUN mkdir /input
 RUN chmod -R 777 /input
-
-# install snpEff database for hg19
-RUN snpEff download hg19
