@@ -67,4 +67,16 @@ docker build ~/code/dab-seq/ -t dab-seq:latest
 
 2. Organize the input files on the host machine in the same file structure as described in [Input File Requirements](##input-file-requirements).
 
+3. Edit the included bash script `run_dabseq_docker.sh` with the appropriate cohort and sample information. Samples to barcode can be added as needed. The user running the pipeline should also be specified. This user should also have read/write access to the input FASTQ files.
 
+4. Run `run_dabseq_docker.sh`.
+
+That's it! The pipeline will run in the Docker container and produce output files at the mounted locations on the host machine.
+
+## Memory and CPU Considerations
+
+DNA genotyping is CPU and memory-intensive for a single bulk sample, let alone thousands of single cells. The DAb-seq pipeline is implemented with tunable parallelization to scale to the resources available on different systems. In its default configuration, the pipeline requires at least 64 gb of memory and 16 physical threads to run. Changing the amount of cells aligned simultaneously or the number of genomic intervals genotyped in parallel can reduce this hardware requirement significantly, with a corresponding increase in total processing time.
+
+## Output Files
+
+Genotyping data is saved in a new directory labeled `GENOTYPING` in the root of each cohort. A compresed HDF5 file contains matrices of discrete genotyping calls for all cells in the cohort. Further details on reading data from this file can be found in the included Python notebooks. Additionally, an antibody UMI counts table is included in the `abs` directory within each sample folder. Together, these files form the basis for downstream DAb-seq analyses, examples of which can be found in the included Python notebooks.
