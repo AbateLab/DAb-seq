@@ -18,11 +18,11 @@ The configuration file is subdivided into sections for each analysis module (see
 
 The folder structure of the input FASTQ files needs to be set up in a specific way to allow the program to find everything. For a given cohort (CohortA) of samples to joint-genotype (Timepoint1 and Timepoint2), the folder should look like:
 ```
-Timepoint1 DNA Panel: .../CohortA/Timepoint1/fastq/panel/<filename.fastq.gz>
-Timepoint1 Abs: .../CohortA/Timepoint1/fastq/abs/<filename.fastq.gz>
+Timepoint1 DNA Panel:   .../CohortA/Timepoint1/fastq/panel/<filename.fastq.gz>
+Timepoint1 Abs:         .../CohortA/Timepoint1/fastq/abs/<filename.fastq.gz>
 
-Timepoint2 DNA Panel: .../CohortA/Timepoint2/fastq/panel/<filename.fastq.gz>
-Timepoint2 Abs: .../CohortA/Timepoint2/fastq/abs/<filename.fastq.gz>
+Timepoint2 DNA Panel:   .../CohortA/Timepoint2/fastq/panel/<filename.fastq.gz>
+Timepoint2 Abs:         .../CohortA/Timepoint2/fastq/abs/<filename.fastq.gz>
 ```
 For each `<filename.fastq.gz>`, both R1 and R2 files need to be present. When sequencing multiple tubes of Tapestri output (e.g. grouping tubes 1-4 and 5-8 into two libraries), FASTQ files from multiple tubes should be placed in the same folder. Users should verify that the panel and antibody filenames remain in the same order when sorted lexicographically (a simple filenaming scheme like panel-A/abs-A, panel-B/abs-B, etc.. works well).
 
@@ -69,7 +69,7 @@ docker build ~/code/dab-seq/ -t dab-seq:latest
 
 3. Edit the included bash script `run_dabseq_docker.sh` with the appropriate cohort and sample information. Samples to barcode can be added as needed. The user running the pipeline should also be specified. This user should also have read/write access to the input FASTQ files.
 
-4. Run `run_dabseq_docker.sh`.
+4. Run `run_dabseq_docker.sh`. You may need to change the file permissions to allow execution before running (e.g. `chmod +x run_dabseq_docker.sh`).
 
 That's it! The pipeline will run in the Docker container and produce output files at the mounted locations on the host machine.
 
