@@ -10,15 +10,23 @@ DAb-seq is a multiomic platform combining targeted genotyping and immunophenotyp
 
 The DAb-seq data analysis pipeline incoporates elements of targeted DNA genotyping and digital fragment counting, as in RNA-seq. The primary output of the pipeline is a genotyping matrix of calls by cell, and a counts matrix of antibody UMI counts by cell.
 
-## Running the Pipeline
+## Input File Requirements
 
-The pipeline is run through the main Python script, `dabseq_pipeline.py`, which must be run sequentially in `barcode` and `genotype` modes.
+The pipeline requires as input, at a minimum, a configuration file and paired-end, compressed FASTQ files (ending in ".fastq.gz").
 
-### Pipeline Input Files
+The configuration file is subdivided into sections for each analysis module (see the provided example, `dabseq.cfg`). Users should be sure to indicate the correct panel files (.bed and .amplicons). Mission Bio's standard AML and tumor hotspot (THP) panels are built-in and need not be provided separately.
 
+The folder structure of the input FASTQ files needs to be set up in a specific way to allow the program to find everything. For a given cohort (CohortA) of samples to joint-genotype (Timepoint1 and Timepoint2), the folder should look like:
+```
+Timepoint1 DNA Panel: .../CohortA/Timepoint1/fastq/panel/<filename.fastq.gz>
+Timepoint1 Abs: .../CohortA/Timepoint1/fastq/abs/<filename.fastq.gz>
 
+Timepoint2 DNA Panel: .../CohortA/Timepoint2/fastq/panel/<filename.fastq.gz>
+Timepoint2 Abs: .../CohortA/Timepoint2/fastq/abs/<filename.fastq.gz>
+```
+For each `<filename.fastq.gz>`, both R1 and R2 files need to be present. When sequencing multiple tubes of Tapestri output (e.g. grouping tubes 1-4 and 5-8 into two libraries), FASTQ files from multiple tubes should be placed in the same folder. Users should verify that the panel and antibody filenames remain in the same order when sorted lexicographically (a simple filenaming scheme like panel-A/abs-A, panel-B/abs-B, etc.. works well).
 
-### Software Dependencies
+## Software Dependencies
 
 The following software packages should be installed and located on the user's PATH. The version numbers shown are those used in the DAb-seq publication.
 
@@ -32,11 +40,15 @@ The following software packages should be installed and located on the user's PA
 * BBMap (38.57)
 * snpEff (4.3t)
 
-To simplify installation and enhance data reproducibility, the pipeline can also be run in a Docker container. A Dockerfile is included in the repo and instructions for building and running the DAb-seq image are listed in the section [DAb-seq in Docker](###dab-seq-in-docker).
+To simplify installation and enhance data reproducibility, the pipeline can also be run in a Docker container. Instructions for building and running the DAb-seq image are listed in the section [DAb-seq in Docker](###dab-seq-in-docker).
+
+## Running the Pipeline
+
+The pipeline is run through the main Python script, `dabseq_pipeline.py`, which must be run sequentially in `barcode` and `genotype` modes.
 
 ### `barcode` Mode
 
-In `barcode` mode, the pipeline processes raw FASTQ files according to settings in a configuration file (see the provided example, `dabseq.cfg`). The script demultiplexes DNA panel amplicons and antibody tags into single cells, aligns panel reads to the human genome, and generates a GVCF file for each cell. For specific usage instructions and a list of arguments, use the `-h` option.
+In `barcode` mode, the pipeline processes raw FASTQ files according to settings in a configuration file . The script demultiplexes DNA panel amplicons and antibody tags into single cells, aligns panel reads to the human genome, and generates a GVCF file for each cell.
 
 ### `genotype` Mode
 
