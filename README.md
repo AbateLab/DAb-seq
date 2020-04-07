@@ -26,6 +26,8 @@ Timepoint2 Abs: .../CohortA/Timepoint2/fastq/abs/<filename.fastq.gz>
 ```
 For each `<filename.fastq.gz>`, both R1 and R2 files need to be present. When sequencing multiple tubes of Tapestri output (e.g. grouping tubes 1-4 and 5-8 into two libraries), FASTQ files from multiple tubes should be placed in the same folder. Users should verify that the panel and antibody filenames remain in the same order when sorted lexicographically (a simple filenaming scheme like panel-A/abs-A, panel-B/abs-B, etc.. works well).
 
+When running the pipeline in `dna-only` or `ab-only` modes, the user is not required to create the folders for the missing file types.
+
 ## Software Dependencies
 
 The following software packages should be installed and located on the user's PATH. The version numbers shown are those used in the DAb-seq publication.
@@ -40,7 +42,7 @@ The following software packages should be installed and located on the user's PA
 * BBMap (38.57)
 * snpEff (4.3t)
 
-To simplify installation and enhance data reproducibility, the pipeline can also be run in a Docker container. Instructions for building and running the DAb-seq image are listed in the section [DAb-seq in Docker](###dab-seq-in-docker).
+To simplify installation and enhance data reproducibility, the pipeline can also be run in a Docker container. Instructions for building and running the DAb-seq image are listed in the section [DAb-seq in Docker](##dab-seq-in-docker).
 
 ## Running the Pipeline
 
@@ -48,12 +50,21 @@ The pipeline is run through the main Python script, `dabseq_pipeline.py`, which 
 
 ### `barcode` Mode
 
-In `barcode` mode, the pipeline processes raw FASTQ files according to settings in a configuration file . The script demultiplexes DNA panel amplicons and antibody tags into single cells, aligns panel reads to the human genome, and generates a GVCF file for each cell.
+In `barcode` mode, the pipeline processes raw FASTQ files according to settings in a configuration file . The script demultiplexes DNA panel amplicons and antibody tags into single cells, aligns panel reads to the human genome, and generates a GVCF file for each cell. All samples belonging to the same cohort must be individually barcoded before joint genotyping.
 
 ### `genotype` Mode
 
-In `genotype` mode, the pipeline calls variants for samples that have been processed in `barcode` mode. The script imports GVCFs into a GenomicsDB database (GATK GenomicsDBImport) and calls genotypes (GATK GenotypeGVCFs) separately for each genomic interval in parallel.
+In `genotype` mode, the pipeline calls variants for a single cohort, containing samples that have been individually processed in `barcode` mode. The script imports GVCFs into a GenomicsDB database (GATK GenomicsDBImport) and calls genotypes (GATK GenotypeGVCFs) separately for each genomic interval in parallel.
 
 ## DAb-seq in Docker
 
 Running the DAb-seq pipeline in a Docker container is recommended and ensures that the pipeline dependencies are installed and configured properly.
+
+1. Build the DAb-seq image using Docker (it will take some time to build the Bowtie2 index):
+```
+docker build ~/code/dab-seq/ -t dab-seq:latest
+```
+
+2. Organize the input files on the host machine in the same file structure as described in [Input File Requirements](##input-file-requirements).
+
+
