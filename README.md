@@ -79,4 +79,8 @@ DNA genotyping is CPU and memory-intensive for a single bulk sample, let alone t
 
 ## Output Files
 
+
+![DAb-seq Output](https://i.imgur.com/YYzjG3H.png)
+<p align="center"><i>The DAb-seq output can be represented as linked genotyping and antibody UMI count tables.</i><br></p>
+
 Genotyping data is saved in a new directory labeled `GENOTYPING` in the root of each cohort. A compresed HDF5 file contains matrices of discrete genotyping calls for all cells in the cohort. Further details on reading data from this file can be found in the included Python notebooks. Additionally, an antibody UMI counts table is included in the `abs` directory within each sample folder. Together, these files form the basis for downstream DAb-seq analyses, examples of which can be found in the included Python notebooks.
