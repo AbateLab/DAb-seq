@@ -62,7 +62,7 @@ Running the DAb-seq pipeline in a Docker container is recommended and ensures th
 
 1. Build the DAb-seq image using Docker (it will take some time to build the Bowtie2 index):
 ```
-docker build ~/code/dab-seq/ -t dab-seq:latest
+docker build <path_to_dabseq_repo> -t dab-seq:latest
 ```
 
 2. Organize the input files on the host machine in the same file structure as described in [Input File Requirements](##input-file-requirements).
