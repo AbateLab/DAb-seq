@@ -842,6 +842,43 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, ploidy, itd_vcf_file=Fa
         f.create_dataset('VARIANTS', data=names, compression='gzip')
         f.create_dataset('CELL_BARCODES', data=barcodes, compression='gzip')
 
+def add_amplicon_counts(geno_hdf5, sample_names, tsvs):
+    # add amplicon counts to compressed hdf5 file
+
+    # get list of valid cell barcodes
+    with h5py.File(geno_hdf5, 'r') as f:
+        cell_barcodes = copy.deepcopy([c.decode('utf8') for c in f['CELL_BARCODES']])
+
+    # save count files from samples into dataframes, appending sample name to barcode
+    amplicon_dataframes = []
+
+    for i in range(len(sample_names)):
+        sample_count_df = pd.read_csv(tsvs[i], sep='\t', header=0, index_col=0)
+        sample_count_df.index = sample_count_df.index + '-' + sample_names[i]
+        amplicon_dataframes.append(sample_count_df)
+
+    # check that amplicon count dataframes have all cell barcodes present
+    amplicon_barcodes = [list(d.index) for d in amplicon_dataframes]
+    amplicon_barcodes = sum(amplicon_barcodes, [])
+    assert set(amplicon_barcodes) == set(cell_barcodes), 'Sample cell barcodes do not match!'
+
+    # check that all samples have identical amplicons
+    sample_amplicons = [list(d.columns) for d in amplicon_dataframes]
+    assert all(x == sample_amplicons[0] for x in sample_amplicons), 'Amplicon names do not match!'
+
+    # save list of amplicon names to the hdf5 file
+    with h5py.File(geno_hdf5, 'a') as f:
+        amplicon_names = [a.encode('utf8') for a in list(amplicon_dataframes[0].columns)]
+        f.create_dataset('AMPLICON_NAMES', data=amplicon_names, compression='gzip')
+
+    # save the amplicon count table to the hdf5 file
+    # reorder the amplicon table to the same as the cell barcodes list
+    all_counts = pd.concat(amplicon_dataframes)
+    with h5py.File(geno_hdf5, 'a') as f:
+        dataset = np.asarray(all_counts.reindex(cell_barcodes))
+        f.create_dataset('AMPLICON_COUNTS', data=dataset, dtype='i4', compression='gzip')
+
+
 def add_hdf5_ab_counts(geno_hdf5, sample_names, ab_count_dirs):
     # add ab counts to compressed hdf5 file
 

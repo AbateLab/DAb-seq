@@ -806,7 +806,7 @@ if __name__ == "__main__":
 
             # annotate vcf with snpeff (functional predictions)
             resources.snpeff_annotate(snpeff_summary, snpeff_human_config_file, split_vcf, snpeff_annot_vcf)
-    
+
             # annotate with bcftools
             # use clinvar database
             resources.bcftools_annotate(clinvar_human_vcf_file, snpeff_annot_vcf, '-c INFO', annot_vcf)
@@ -857,6 +857,10 @@ if __name__ == "__main__":
         # non-human samples
         elif non_human:
             resources.vcf_to_tables(split_vcf, geno_hdf5, variants_tsv, ploidy, itd_vcf_file=False, non_human=True)
+
+        # add amplicon count tables (from valid cells) to hdf5 file
+        amplicon_counts_tsvs = [cohort_dir + s + '/barcodes/' + s + '.cells.tsv' for s in sample_names]
+        resources.add_amplicon_counts(geno_hdf5, sample_names, amplicon_counts_tsvs)
 
         # if abs in experiment, add counts to hdf5 file
         if not dna_only:
