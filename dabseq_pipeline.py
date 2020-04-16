@@ -95,8 +95,8 @@ if __name__ == "__main__":
     parser.add_argument('--ignore-panel-uniformity', action='store_true', default=False,
                         help='option to ignore panel uniformity threshold when calling cells (default cell threshold '
                              'is 60% of amplicons with >= 10X coverage)')
-    parser.add_argument('--ploidy', type=int, default=2,
-                        help='organism ploidy (default: 2)')
+    parser.add_argument('--ploidy', type=int, default=2, choices=[1, 2],
+                        help='organism ploidy (default: 2) [haploid (1) or diploid (2) supported only]')
 
     # parse arguments
     args = parser.parse_args()

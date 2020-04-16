@@ -688,6 +688,15 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, ploidy, itd_vcf_file=Fa
     # if itd_files is given, adds flt3 itd variants to table
 
     # load vcf file into numpy array
+    # layers to extract:
+    # GT: genotype call
+    #   GT for HAPLOID: (0: WT, 1: MUT, 3: no call)
+    #   GT for DIPLOID: (0: WT, 1: HET, 2: HOM, 3: no call)
+    # DP: total read depth
+    # GQ: genotype quality
+    # AD: alt allele depth (one alternate allele per record, after splitting)
+    # RD: ref allele depth
+
     if non_human:
         # if non-human, exclude annotation info from snpeff
         vcf = allel.read_vcf(vcf_file,
@@ -697,6 +706,20 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, ploidy, itd_vcf_file=Fa
                                      'calldata/GQ',
                                      'calldata/DP',
                                      'samples'])
+
+        # extract genotype layer
+        if ploidy == 1:
+            GT = vcf['calldata/GT'][:, :, 0]
+            GT[GT == -1] = 3
+
+        elif ploidy == 2:
+            GT = np.sum(vcf['calldata/GT'], axis=2)
+            GT[GT == -2] = 3
+
+        else:
+            print('Invalid ploidy selected (diploid or haploid ONLY)!')
+            raise SystemExit
+
     else:
         # if human, include annotation info from snpeff
         vcf = allel.read_vcf(vcf_file,
@@ -709,15 +732,11 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, ploidy, itd_vcf_file=Fa
                                      'samples',
                                      'ANN'])
 
-    # layers to extract:
-    # GT: genotype (0: WT, 1: HET, 2: HOM, 3: no call) [diploid]
-    # DP: total read depth
-    # GQ: genotype quality
-    # AD: alt allele depth
-    # RD: ref allele depth
+        # extract genotype layer
+        GT = np.sum(vcf['calldata/GT'], axis=2)
+        GT[GT == -2] = 3
 
-    GT = np.sum(vcf['calldata/GT'], axis=2)
-    GT[GT == (-1 * ploidy)] = 3
+    # extract remaining layers
     DP = np.stack(vcf['calldata/DP'], axis=0)
     GQ = np.stack(vcf['calldata/GQ'], axis=0)
     AD = np.stack(vcf['calldata/AD'][:, :, 1], axis=0)
