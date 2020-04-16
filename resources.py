@@ -13,6 +13,7 @@ two classes are defined:
 
 import os
 import os.path
+import shutil
 import csv
 from itertools import product, combinations, izip
 from collections import Counter
@@ -300,6 +301,8 @@ class TapestriTube(object):
         # process final group
         counts = self.umi_tools_cluster(group_umis, clustering_method)
         self.write_umis(counts, group_id_prev, umi_counts, clustering_method)
+        umi_counts.write('\n')
+        umi_counts.close()
 
     @staticmethod
     def umi_tools_cluster(group_umis, clustering_method):
@@ -354,7 +357,7 @@ class SingleCell(object):
 
     def align_and_index(self, bt2_ref):
 
-        # align the panel to the bowtie2 human index and generate sorted bam file
+        # align the panel to the bowtie2 index and generate sorted bam file
         # read filters: read mapped, mapq >= 3, primary alignment
         align_cmd = 'bowtie2 -x %s --mm --interleaved %s' \
                     ' --rg-id %s --rg SM:%s --rg PL:ILLUMINA --rg CN:UCSF --quiet' \
@@ -383,8 +386,9 @@ class SingleCell(object):
 
         subprocess.call(flt3_cmd, shell=True)
 
-    def call_variants(self, fasta, interval_file):
+    def call_variants(self, fasta, interval_file, ploidy):
         # call variants using gatk
+        # setting --max-reads-per-alignment-start to use downsampling
 
         variants_cmd = 'gatk HaplotypeCaller -R %s -I %s -O %s -L %s ' \
                        '--emit-ref-confidence GVCF ' \
@@ -392,19 +396,21 @@ class SingleCell(object):
                        '--native-pair-hmm-threads 1 ' \
                        '--max-alternate-alleles 2 ' \
                        '--standard-min-confidence-threshold-for-calling 0 ' \
-                       '--max-reads-per-alignment-start 0 ' \
-                       '--minimum-mapping-quality 3' \
+                       '--max-reads-per-alignment-start 200 ' \
+                       '--minimum-mapping-quality 3 ' \
+                       '--sample-ploidy %s' \
                        % (fasta,
                           self.bam,
                           self.vcf,
-                          interval_file)
+                          interval_file,
+                          ploidy)
 
         subprocess.call(variants_cmd, shell=True)
 
 def count_alignments(r1_files, amplicon_file, fasta_file, tsv, aln_stats_file, temp_dir):
     # align and count r1 reads for all sample barcodes, and save to tsv file
 
-    # get fasta file from human genome for this interval
+    # get fasta file from genome for this interval
     insert_fasta = temp_dir + 'amplicons.fasta'
     subprocess.call('bedtools getfasta -fi %s -bed %s -fo %s -name' % (fasta_file, amplicon_file, insert_fasta), shell=True)
 
@@ -454,7 +460,59 @@ def count_alignments(r1_files, amplicon_file, fasta_file, tsv, aln_stats_file, t
         for c in amplicons:
             f.write(c + '\t' + '\t'.join([str(amplicons[c][r]) for r in refs]) + '\n')
 
-def load_barcodes(barcode_file, max_dist, check_barcodes=True):
+def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=None):
+    # converts umi group counts to counts by cell
+
+    # create by_method directory if it doesn't exist
+    if cells is None:
+        ab_dir_by_method = ab_dir + 'by_method.ALL/'
+    else:
+        ab_dir_by_method = ab_dir + 'by_method.CELLS/'
+
+    if not os.path.exists(ab_dir_by_method):
+        os.mkdir(ab_dir_by_method)
+    else:
+        shutil.rmtree(ab_dir_by_method)
+        os.mkdir(ab_dir_by_method)
+
+    # load umi counts
+    umi_counts = pd.read_csv(umi_counts_merged, sep='\t', header=0, index_col=0)
+
+    # filter on valid cells
+    if cells is not None:
+        valid_barcodes = sorted([c.cell_barcode for c in cells])
+        umi_counts = umi_counts[umi_counts.index.isin(valid_barcodes)]
+
+    # get all ab barcode descriptions in experiment
+    ab_barcodes = sorted(load_barcodes(ab_barcode_csv_file).values())
+
+    # for each method, save in a dataframe
+    count_methods = [m for m in umi_counts.columns if 'ab_desc' not in m]
+
+    for m in count_methods:
+        ab_counts_by_method = pd.pivot_table(umi_counts, values=m, index=['cell_barcode'], columns=['ab_description'],
+                                             aggfunc=np.sum).fillna(0)
+
+        # reorder the cell barcodes
+        # if a cell is missing (unlikely but possible), fill with 0
+        if cells is not None:
+            ab_counts_by_method = ab_counts_by_method.reindex(valid_barcodes, fill_value=0)
+
+        # if an ab is missing (also unlikely), fill with 0
+        for ab in ab_barcodes:
+            if ab not in ab_counts_by_method:
+                ab_counts_by_method[ab] = 0
+
+        # sort by column name and save umi counts file
+        ab_counts_by_method.sort_index(axis=1, inplace=True)
+        ab_counts_by_method = ab_counts_by_method.astype(int)
+        if cells is not None:
+            count_method_file = os.path.basename(umi_counts_merged)[:-3] + m + '.cells.tsv'
+        else:
+            count_method_file = os.path.basename(umi_counts_merged)[:-3] + m + '.all.tsv'
+        ab_counts_by_method.to_csv(path_or_buf=ab_dir_by_method+count_method_file, sep='\t')
+
+def load_barcodes(barcode_file, max_dist=1, check_barcodes=True):
     # loads barcodes from csv and checks all pairwise distances to ensure error correction will work
     # returns a dictionary of barcodes with their descriptions
 
@@ -573,7 +631,7 @@ def db_import(db_path, sample_map_path, interval):
 
     process = subprocess.call(db_import_cmd, shell=True)
 
-def joint_genotype(db_path, fasta, interval, output_vcf):
+def joint_genotype(db_path, fasta, interval, output_vcf, ploidy):
     # perform joint genotyping across a cohort using data from a genomicsdb store
 
     # make call to gatk for genotyping
@@ -582,20 +640,22 @@ def joint_genotype(db_path, fasta, interval, output_vcf):
                    '-R %s ' \
                    '-L %s ' \
                    '-O %s ' \
-                   '--include-non-variant-sites' \
+                   '--include-non-variant-sites ' \
+                   '--sample-ploidy %s' \
                    % (db_path,
                       fasta,
                       interval,
-                      output_vcf)
+                      output_vcf,
+                      ploidy)
 
     process = subprocess.call(genotype_cmd, shell=True)
 
-def left_align_trim(human_fasta_file, geno_vcf, split_vcf):
+def left_align_trim(ref_fasta, geno_vcf, split_vcf):
     # uses bcftools to split multiallelics, left-align, and trim
 
     # split and left-align variants
     split_cmd = 'bcftools norm --threads 16 -f %s --check-ref w -m - %s > %s' %\
-                (human_fasta_file, geno_vcf, split_vcf)
+                (ref_fasta, geno_vcf, split_vcf)
 
     subprocess.call(split_cmd, shell=True)
 
@@ -623,142 +683,211 @@ def bcftools_annotate(annotations_vcf, input_vcf, column_info, output_vcf):
                                                       output_vcf)
     subprocess.call(bcf_cmd, shell=True)
 
-def vcf_to_tables(vcf_file, genotype_file, variants_tsv, itd_vcf_file=False):
+def vcf_to_tables(vcf_file, genotype_file, variants_tsv, ploidy, itd_vcf_file=False, non_human=False):
     # parses a vcf file into a series of tables
     # if itd_files is given, adds flt3 itd variants to table
 
     # load vcf file into numpy array
-    # include annotation info from snpeff
-    vcf = allel.read_vcf(vcf_file,
-                         transformers=allel.ANNTransformer(),
-                         fields=['variants/*',
-                                 'calldata/GT',
-                                 'calldata/AD',
-                                 'calldata/GQ',
-                                 'calldata/DP',
-                                 'samples',
-                                 'ANN'])
+    if non_human:
+        # if non-human, exclude annotation info from snpeff
+        vcf = allel.read_vcf(vcf_file,
+                             fields=['variants/*',
+                                     'calldata/GT',
+                                     'calldata/AD',
+                                     'calldata/GQ',
+                                     'calldata/DP',
+                                     'samples'])
+    else:
+        # if human, include annotation info from snpeff
+        vcf = allel.read_vcf(vcf_file,
+                             transformers=allel.ANNTransformer(),
+                             fields=['variants/*',
+                                     'calldata/GT',
+                                     'calldata/AD',
+                                     'calldata/GQ',
+                                     'calldata/DP',
+                                     'samples',
+                                     'ANN'])
+
     # layers to extract:
-    # GT: genotype (0: WT, 1: HET, 2: HOM, 3: no call)
+    # GT: genotype (0: WT, 1: HET, 2: HOM, 3: no call) [diploid]
     # DP: total read depth
     # GQ: genotype quality
     # AD: alt allele depth
     # RD: ref allele depth
 
     GT = np.sum(vcf['calldata/GT'], axis=2)
-    GT[GT == -2] = 3
+    GT[GT == (-1 * ploidy)] = 3
     DP = np.stack(vcf['calldata/DP'], axis=0)
     GQ = np.stack(vcf['calldata/GQ'], axis=0)
     AD = np.stack(vcf['calldata/AD'][:, :, 1], axis=0)
     RD = np.stack(vcf['calldata/AD'][:, :, 0], axis=0)
 
-    # create variant names
-    names = [vcf['variants/ANN_Gene_Name'][i] +
-             ':' + vcf['variants/CHROM'][i] +
-             ':' + str(vcf['variants/POS'][i]) +
-             ':' + vcf['variants/REF'][i] +
-             '/' + vcf['variants/ALT'][:, 0][i]
-             for i in range((vcf['variants/REF'].shape[0]))]
+    # non-human reference
+    if non_human:
+        # create variant names
+        names = [vcf['variants/CHROM'][i] +
+                 ':' + str(vcf['variants/POS'][i]) +
+                 ':' + vcf['variants/REF'][i] +
+                 '/' + vcf['variants/ALT'][:, 0][i]
+                 for i in range((vcf['variants/REF'].shape[0]))]
 
-    # assemble and save variant annotations to file
-    variants_table = pd.DataFrame(data=names, columns=['Name'])
+    # human reference
+    else:
+        # create variant names
+        names = [vcf['variants/ANN_Gene_Name'][i] +
+                 ':' + vcf['variants/CHROM'][i] +
+                 ':' + str(vcf['variants/POS'][i]) +
+                 ':' + vcf['variants/REF'][i] +
+                 '/' + vcf['variants/ALT'][:, 0][i]
+                 for i in range((vcf['variants/REF'].shape[0]))]
 
-    # clinvar variation id
-    variants_table['ClinVar_Variation_ID'] = vcf['variants/ID']
+        # assemble and save variant annotations to file
+        variants_table = pd.DataFrame(data=names, columns=['Name'])
 
-    # snpeff columns
-    ANN_columns = [c for c in list(vcf) if '/ANN' in c]
-    for ann in ANN_columns:
-        variants_table['SnpEff_' + ann.split('/ANN_')[1]] = vcf[ann]
+        # clinvar variation id
+        variants_table['ClinVar_Variation_ID'] = vcf['variants/ID']
 
-    # clinvar columns
-    CLN_columns = [c for c in list(vcf) if '/CLN' in c]
-    for cln in CLN_columns:
-        variants_table['ClinVar_' + cln.split('/')[1]] = vcf[cln]
+        # snpeff columns
+        ANN_columns = [c for c in list(vcf) if '/ANN' in c]
+        for ann in ANN_columns:
+            variants_table['SnpEff_' + ann.split('/ANN_')[1]] = vcf[ann]
 
-    # optional: add flt3-itd variants to table
-    if itd_vcf_file:
+        # clinvar columns
+        CLN_columns = [c for c in list(vcf) if '/CLN' in c]
+        for cln in CLN_columns:
+            variants_table['ClinVar_' + cln.split('/')[1]] = vcf[cln]
 
-        # make sure flt3 vcf is not empty
-        empty = True
-        with open(itd_vcf_file, 'r') as f:
-            for line in f:
-                if line[0] != '#':
-                    empty = False
-                    break
+        # optional: add flt3-itd variants to table
+        if itd_vcf_file:
 
-        if not empty:
+            # make sure flt3 vcf is not empty
+            empty = True
+            with open(itd_vcf_file, 'r') as f:
+                for line in f:
+                    if line[0] != '#':
+                        empty = False
+                        break
 
-            itd_vcf = allel.read_vcf(itd_vcf_file, fields=['*'])
+            if not empty:
 
-            # create itd variant names
-            itd_names = ['FLT3-ITD' +
-                         ':' + itd_vcf['variants/CHROM'][i] +
-                         ':' + str(itd_vcf['variants/POS'][i]) +
-                         ':' + itd_vcf['variants/REF'][i] +
-                         '/' + itd_vcf['variants/ALT'][:, 0][i]
-                         for i in range((itd_vcf['variants/REF'].shape[0]))]
+                itd_vcf = allel.read_vcf(itd_vcf_file, fields=['*'])
 
-            # add itd variant rows to variants table
-            itd_table = pd.DataFrame(data=list(set(itd_names)), columns=['Name'])
-            names += list(set(itd_names))
-            variants_table = pd.concat([variants_table, itd_table], sort=True)
+                # create itd variant names
+                itd_names = ['FLT3-ITD' +
+                             ':' + itd_vcf['variants/CHROM'][i] +
+                             ':' + str(itd_vcf['variants/POS'][i]) +
+                             ':' + itd_vcf['variants/REF'][i] +
+                             '/' + itd_vcf['variants/ALT'][:, 0][i]
+                             for i in range((itd_vcf['variants/REF'].shape[0]))]
 
-            # add itd variants to other layers
-            # set RD = AD and GQ = 100 when itd is present
-            # default for GT is 'WT' (0) - no ITD present
+                # add itd variant rows to variants table
+                itd_table = pd.DataFrame(data=list(set(itd_names)), columns=['Name'])
+                names += list(set(itd_names))
+                variants_table = pd.concat([variants_table, itd_table], sort=True)
 
-            # create additional array entries
-            GT = np.concatenate((GT, np.zeros((itd_table.shape[0], GT.shape[1]))), axis=0)
-            GQ = np.concatenate((GQ, np.zeros((itd_table.shape[0], GQ.shape[1]))), axis=0)
-            DP = np.concatenate((DP, np.zeros((itd_table.shape[0], DP.shape[1]))), axis=0)
-            AD = np.concatenate((AD, np.zeros((itd_table.shape[0], AD.shape[1]))), axis=0)
-            RD = np.concatenate((RD, np.zeros((itd_table.shape[0], RD.shape[1]))), axis=0)
+                # add itd variants to other layers
+                # set RD = AD and GQ = 100 when itd is present
+                # default for GT is 'WT' (0) - no ITD present
 
-            # indices for adding entries to arrays
-            var_ind = dict(zip(names, range(len(names))))
-            bar_ind = dict(zip(vcf['samples'], range(len(vcf['samples']))))
+                # create additional array entries
+                GT = np.concatenate((GT, np.zeros((itd_table.shape[0], GT.shape[1]))), axis=0)
+                GQ = np.concatenate((GQ, np.zeros((itd_table.shape[0], GQ.shape[1]))), axis=0)
+                DP = np.concatenate((DP, np.zeros((itd_table.shape[0], DP.shape[1]))), axis=0)
+                AD = np.concatenate((AD, np.zeros((itd_table.shape[0], AD.shape[1]))), axis=0)
+                RD = np.concatenate((RD, np.zeros((itd_table.shape[0], RD.shape[1]))), axis=0)
 
-            # for each cell barcode, add entry to genotyping array
-            for i in range(len(itd_vcf['variants/ID'])):
-                cell_barcode = itd_vcf['variants/ID'][i]
-                alt_depth = itd_vcf['variants/QUAL'][i]
-                vaf = itd_vcf['variants/VAF'][i]
-                total_depth = int(round(np.true_divide(alt_depth, vaf)))
+                # indices for adding entries to arrays
+                var_ind = dict(zip(names, range(len(names))))
+                bar_ind = dict(zip(vcf['samples'], range(len(vcf['samples']))))
 
-                # set GT according to vaf
-                # het mut
-                if vaf < 0.9:
-                    geno = 1
+                # for each cell barcode, add entry to genotyping array
+                for i in range(len(itd_vcf['variants/ID'])):
+                    cell_barcode = itd_vcf['variants/ID'][i]
+                    alt_depth = itd_vcf['variants/QUAL'][i]
+                    vaf = itd_vcf['variants/VAF'][i]
+                    total_depth = int(round(np.true_divide(alt_depth, vaf)))
 
-                # hom mut
-                else:
-                    geno = 2
+                    # set GT according to vaf
+                    # het mut
+                    if vaf < 0.9:
+                        geno = 1
 
-                # store entries in genotyping array
-                GT[var_ind[itd_names[i]], bar_ind[cell_barcode]] = geno
-                GQ[var_ind[itd_names[i]], bar_ind[cell_barcode]] = 100
-                DP[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
-                RD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
-                AD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = alt_depth
+                    # hom mut
+                    else:
+                        geno = 2
 
-    # save variants to file
-    variants_table.to_csv(path_or_buf=variants_tsv, sep='\t', index=False, encoding='utf-8')
+                    # store entries in genotyping array
+                    GT[var_ind[itd_names[i]], bar_ind[cell_barcode]] = geno
+                    GQ[var_ind[itd_names[i]], bar_ind[cell_barcode]] = 100
+                    DP[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
+                    RD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = total_depth
+                    AD[var_ind[itd_names[i]], bar_ind[cell_barcode]] = alt_depth
+
+        # save variants to file
+        variants_table.to_csv(path_or_buf=variants_tsv, sep='\t', index=False, encoding='utf-8')
 
     # encode variant names and cell barcodes
     names = [n.encode('utf8') for n in names]
     barcodes = [b.encode('utf8') for b in vcf['samples']]
 
     # save genotyping information to compressed hdf5 file
+    # transpose to yield cells as rows, variants as columns
     with h5py.File(genotype_file, 'w') as f:
-        f.create_dataset('GT', data=GT, dtype='i1', compression='gzip')
-        f.create_dataset('GQ', data=GQ, dtype='i1', compression='gzip')
-        f.create_dataset('DP', data=DP, dtype='i2', compression='gzip')
-        f.create_dataset('AD', data=AD, dtype='i2', compression='gzip')
-        f.create_dataset('RD', data=RD, dtype='i2', compression='gzip')
+        f.create_dataset('GT', data=np.transpose(GT), dtype='i1', compression='gzip')
+        f.create_dataset('GQ', data=np.transpose(GQ), dtype='i1', compression='gzip')
+        f.create_dataset('DP', data=np.transpose(DP), dtype='i2', compression='gzip')
+        f.create_dataset('AD', data=np.transpose(AD), dtype='i2', compression='gzip')
+        f.create_dataset('RD', data=np.transpose(RD), dtype='i2', compression='gzip')
         f.create_dataset('VARIANTS', data=names, compression='gzip')
         f.create_dataset('CELL_BARCODES', data=barcodes, compression='gzip')
 
+def add_hdf5_ab_counts(geno_hdf5, sample_names, ab_count_dirs):
+    # add ab counts to compressed hdf5 file
+
+    # get list of valid cell barcodes
+    with h5py.File(geno_hdf5, 'r') as f:
+        cell_barcodes = copy.deepcopy([c.decode('utf8') for c in f['CELL_BARCODES']])
+
+    # combine abs from multiple samples into same dataframe, appending sample name to barcode
+    count_methods_by_sample = {}    # key: method, value: list of dataframes
+
+    for i in range(len(sample_names)):
+
+        ab_filenames = [ab_count_dirs[i] + f for f in os.listdir(ab_count_dirs[i])]
+        count_methods = [f.split('.')[-3] for f in ab_filenames]
+
+        for j in range(len(count_methods)):
+
+            sample_count_df = pd.read_csv(ab_filenames[j], sep='\t', header=0, index_col=0)
+            sample_count_df.index = sample_count_df.index + '-' + sample_names[i]
+
+            try:
+                count_methods_by_sample[count_methods[j]] = \
+                    count_methods_by_sample[count_methods[j]].append(sample_count_df)
+
+            except KeyError:
+                count_methods_by_sample[count_methods[j]] = sample_count_df
+
+    # check that all methods have all cell barcodes present
+    for m in count_methods_by_sample:
+        assert set(list(count_methods_by_sample[m].index)) == set(cell_barcodes), 'Sample cell barcodes do not match!'
+
+    # check that all methods have identical abs
+    ab_columns = [list(count_methods_by_sample[m].columns) for m in count_methods_by_sample]
+    assert all(x == ab_columns[0] for x in ab_columns), 'Ab column names do not match!'
+
+    # save list of ab descriptions to the hdf5 file
+    with h5py.File(geno_hdf5, 'a') as f:
+        ab_names = [a.encode('utf8') for a in list(count_methods_by_sample['raw'].columns)]
+        f.create_dataset('AB_DESCRIPTIONS', data=ab_names, compression='gzip')
+
+    # save the ab count tables to the hdf5 file
+    # reorder the ab count tables to the same as the cell barcodes list
+    for m in count_methods_by_sample:
+        with h5py.File(geno_hdf5, 'a') as f:
+            dataset = np.asarray(count_methods_by_sample[m].reindex(cell_barcodes))
+            f.create_dataset('ABS/'+m, data=dataset, dtype='i4', compression='gzip')
 
 def file_summary(tubes, cfg_file, summary_file, header_file=False):
     # displays sample files and class variables

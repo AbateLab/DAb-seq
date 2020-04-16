@@ -54,12 +54,11 @@ def download_files(href, access_token, output_dir):
 
             wget_url = "%s?access_token=%s" % (f_json_obj["HrefContent"], access_token)
 
-            print "        Downloading %s to %s....(%i bytes)\n" % (f_json_obj["Path"], target_path, f_json_obj["Size"])
+            print "        Downloading %s to %s....(%i bytes)" % (f_json_obj["Path"], target_path, f_json_obj["Size"])
             downloaded_files.append(target_path)
             p = subprocess.Popen(["wget","-q","-O", target_path, wget_url])
             p.wait()
 
-            print "\n"
             if os.path.getsize(target_path) != f_json_obj["Size"]:
                 raise Exception("Downloading error. %s incorrect size (%i vs %i)" % (target_path, os.path.getsize(target_path), f_json_obj["Size"]))
 

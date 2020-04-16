@@ -14,7 +14,7 @@ import shutil
 
 if __name__ == "__main__":
 
-    base_dir = '/drive3/dabseq/fastq/panel/'
+    base_dir = '<base_folder>'
 
     sample_dirs = os.listdir(base_dir)
 

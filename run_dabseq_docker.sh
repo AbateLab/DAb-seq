@@ -34,6 +34,7 @@ docker run \
 -u $(id -u ${USER}):$(id -g ${USER}) \
 -v $BASE_DIR/$COHORT_NAME/$SAMPLE_NAME_1/:/input/$COHORT_NAME/$SAMPLE_NAME_1/ \
 -v $CFG_FILE_DIR/$CFG_FILE_NAME:/dabseq/config/$CFG_FILE_NAME \
+-v /home/bdemaree/code/dab-seq/:/dabseq/pipeline/DAb-seq/ \
 dab-seq $COHORT_NAME barcode /dabseq/config/$CFG_FILE_NAME \
 --sample-name $SAMPLE_NAME_1 \
 --chem V1 \
@@ -44,6 +45,7 @@ docker run \
 -u $(id -u ${USER}):$(id -g ${USER}) \
 -v $BASE_DIR/$COHORT_NAME/$SAMPLE_NAME_2/:/input/$COHORT_NAME/$SAMPLE_NAME_2/ \
 -v $CFG_FILE_DIR/$CFG_FILE_NAME:/dabseq/config/$CFG_FILE_NAME \
+-v /home/bdemaree/code/dab-seq/:/dabseq/pipeline/DAb-seq/ \
 dab-seq $COHORT_NAME barcode /dabseq/config/$CFG_FILE_NAME \
 --sample-name $SAMPLE_NAME_2 \
 --chem V1 \
@@ -56,6 +58,7 @@ docker run \
 -u $(id -u ${USER}):$(id -g ${USER}) \
 -v $COHORT_DIR/:/input/$COHORT_NAME/ \
 -v $CFG_FILE_DIR/$CFG_FILE_NAME:/dabseq/config/$CFG_FILE_NAME \
+-v /home/bdemaree/code/dab-seq/:/dabseq/pipeline/DAb-seq/ \
 dab-seq $COHORT_NAME genotype /dabseq/config/$CFG_FILE_NAME \
 --slack-token $SLACK_TOKEN
 

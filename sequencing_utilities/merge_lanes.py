@@ -14,8 +14,8 @@ import shutil
 
 if __name__ == "__main__":
 
-    input_folder = '/drive2/iarpa/te2/te_2_2/fastq'
-    output_folder = '/drive2/iarpa/te2/te_2_2/merged'
+    input_folder = '<input_folder>'
+    output_folder = '<output_folder>'
 
     samples = list(set([f.split('_')[0] for f in os.listdir(input_folder) if '.fastq.gz' in f]))
 

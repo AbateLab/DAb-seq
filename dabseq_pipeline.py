@@ -1,7 +1,7 @@
 '''
 
 dab-seq: single-cell dna genotyping and antibody sequencing
-ben demaree 7.9.2019
+ben demaree 2020
 
 the main script for pipeline execution
 
@@ -53,7 +53,7 @@ if __name__ == "__main__":
     -config file defining file paths and variables (dabseq.cfg)
     -raw fastq files (targeted sequencing panel and/or antibody tags)
     -cell and ab barcode csvs
-    -panel bed files
+    -panel interval files
     
     requires the following programs in path:
     -gatk
@@ -70,14 +70,14 @@ if __name__ == "__main__":
     # required arguments
     parser.add_argument('cohort_name', type=str,
                         help='cohort name')
-    parser.add_argument('mode', type=str, choices=['barcode', 'genotype'],
-                        help='pipeline mode ("barcode" or "genotype")')
+    parser.add_argument('mode', type=str, choices=['barcode', 'genotype', 'both'],
+                        help='pipeline mode ("barcode", "genotype", "both")')
     parser.add_argument('cfg_file', type=str,
                         help='config filename')
 
     # optional arguments
     parser.add_argument('--sample-name', default=None, type=str,
-                        help='sample name (required when in barcoding mode)')
+                        help='sample name (required when mode is "barcoding" or "both")')
     parser.add_argument('--chem', type=str, default='V2', choices=['V1', 'V2'],
                         help='chemistry version (V1 or V2) (default: V2)')
     parser.add_argument('--slack-token', type=str, default=None,
@@ -90,6 +90,13 @@ if __name__ == "__main__":
                         help='ab clustering method ("unique" or "all") (default: "all")')
     parser.add_argument('--skip-flt3', action='store_true', default=False,
                         help='option to skip FLT3-ITD calling')
+    parser.add_argument('--non-human', action='store_true', default=False,
+                        help='option to skip steps requiring a human reference (variant prediction and annotation)')
+    parser.add_argument('--ignore-panel-uniformity', action='store_true', default=False,
+                        help='option to ignore panel uniformity threshold when calling cells (default cell threshold '
+                             'is 60% of amplicons with >= 10X coverage)')
+    parser.add_argument('--ploidy', type=int, default=2,
+                        help='organism ploidy (default: 2)')
 
     # parse arguments
     args = parser.parse_args()
@@ -104,10 +111,13 @@ if __name__ == "__main__":
     dna_only = args.dna_only
     ab_only = args.ab_only
     skip_flt3 = args.skip_flt3
+    non_human = args.non_human
+    ignore_panel_uniformity = args.ignore_panel_uniformity
+    ploidy = args.ploidy
 
-    # require a sample name when in barcoding mode
-    if (pipeline_mode == 'barcode' and sample_name is None) or sample_name == 'GENOTYPING':
-        print('Please specify a valid sample name when using barcode mode.')
+    # require a sample name when in barcoding mode (or both)
+    if ((pipeline_mode == 'barcode' or pipeline_mode == 'both') and sample_name is None) or sample_name == 'GENOTYPING':
+        print('Please specify a valid sample name when barcoding.')
         raise SystemExit
 
     # check for config file
@@ -117,67 +127,76 @@ if __name__ == "__main__":
 
     # cannot select both dna_only and ab_only
     if dna_only and ab_only:
-        print('DNA and Ab-only options cannot be used simultaneously.')
+        print('DNA-only and Ab-only options cannot be used simultaneously.')
         raise SystemExit
 
     # cannot perform genotyping in ab_only mode
-    if pipeline_mode == 'genotyping' and ab_only:
+    if (pipeline_mode == 'genotyping' or pipeline_mode == 'both') and ab_only:
         print('Cannot perform genotyping using Ab-only setting.')
         raise SystemExit
 
+    # skip flt3 calling when using non-human references
+    if non_human:
+        skip_flt3 = True
+
     # load config file variables
-    # be careful about using exec
-    else:
-        with open(cfg_f, 'r') as cfg:
-            for line in cfg:
+    # be careful about using exec - never run this pipeline as root
+    with open(cfg_f, 'r') as cfg:
+        for line in cfg:
 
-                if (line[0] == '#') or (line in ['\n', '\r\n']) or (line[0] == ' '):
-                    continue
+            if (line[0] == '#') or (line in ['\n', '\r\n']) or (line[0] == ' '):
+                continue
 
-                elif line[0] == '[':
+            elif line[0] == '[':
 
-                    if '[Barcoding]' in line and pipeline_mode == 'genotype':
-                        line = cfg.next()
-                        while line[0] != '[':
-                            try:
-                                line = cfg.next()
-                            except StopIteration:
-                                break
+                if '[Barcoding]' in line and pipeline_mode == 'genotype':
+                    line = cfg.next()
+                    while line[0] != '[':
+                        try:
+                            line = cfg.next()
+                        except StopIteration:
+                            break
 
-                    if '[DNA]' in line and ab_only:
-                        line = cfg.next()
-                        while line[0] != '[':
-                            try:
-                                line = cfg.next()
-                            except StopIteration:
-                                break
+                if '[DNA]' in line and ab_only:
+                    line = cfg.next()
+                    while line[0] != '[':
+                        try:
+                            line = cfg.next()
+                        except StopIteration:
+                            break
 
-                    if '[Antibodies]' in line and (dna_only or pipeline_mode == 'genotype'):
-                        line = cfg.next()
-                        while line[0] != '[':
-                            try:
-                                line = cfg.next()
-                            except StopIteration:
-                                break
+                if '[Antibodies]' in line and (dna_only or pipeline_mode == 'genotype'):
+                    line = cfg.next()
+                    while line[0] != '[':
+                        try:
+                            line = cfg.next()
+                        except StopIteration:
+                            break
 
-                    if '[Genotyping]' in line and (ab_only or pipeline_mode == 'barcode'):
-                        line = cfg.next()
-                        while line[0] != '[':
-                            try:
-                                line = cfg.next()
-                            except StopIteration:
-                                break
+                if '[Genotyping]' in line and (ab_only or pipeline_mode == 'barcode'):
+                    line = cfg.next()
+                    while line[0] != '[':
+                        try:
+                            line = cfg.next()
+                        except StopIteration:
+                            break
+            else:
+                # save a configuration parameter to a variable
+
+                cfg_variable = line.split('=')[0]
+
+                if 'panel_fastq' in cfg_variable and pipeline_mode == 'genotype':
+                    pass
+                elif 'human' in cfg_variable and non_human:
+                    pass
                 else:
-                    if line.startswith('panel_fastq') and pipeline_mode == 'genotype':
-                        pass
-                    else:
-                        var = line.split("#", 1)[0].strip()  # to remove inline comments
-                        exec(var)
+                    var = line.split("#", 1)[0].strip()  # to remove inline comments
+                    exec (var)
 
     # check all files exist
     all_vars = copy.copy(globals())
     input_files = [all_vars[f] for f in all_vars if '_file' in f and f != '__file__']
-    if not ab_only and pipeline_mode == 'barcode':
+    if not ab_only and (pipeline_mode == 'barcode' or pipeline_mode == 'both'):
         input_files.append(bt2_ref + '.1.bt2')
     missing_files = []
     for f in input_files:
@@ -212,7 +231,7 @@ if __name__ == "__main__":
 #                                                   BARCODING
 ########################################################################################################################
 
-    if pipeline_mode == 'barcode':
+    if pipeline_mode == 'barcode' or pipeline_mode == 'both':
 
         # check that the input fastq directories and create others
         if not ab_only:
@@ -445,6 +464,12 @@ if __name__ == "__main__":
             # remove old umi count files
             umi_file_cleanup = [os.remove(t.umi_counts) for t in tubes]
 
+            # create table of per-cell ab counts for all barcodes
+            resources.umi_counts_by_cell(umi_counts_merged,
+                                         ab_barcode_csv_file,
+                                         ab_dir,
+                                         None)
+
         if not ab_only:
 
             print('''
@@ -461,7 +486,7 @@ if __name__ == "__main__":
             aln_stats_file = barcode_dir + sample_name + '.alignment_stats.txt'
             resources.count_alignments(panel_r1_files,
                                        amplicon_file,
-                                       human_fasta_file,
+                                       ref_fasta_file,
                                        all_tsv,
                                        aln_stats_file,
                                        temp_dir)
@@ -476,7 +501,7 @@ if __name__ == "__main__":
             valid_cells = cell_calling.call(barcode_dir,
                                             sample_name,
                                             'second_derivative',
-                                            threshold=True)
+                                            threshold=(not ignore_panel_uniformity))
 
             # create SingleCell objects for each valid cell
             cells = [resources.SingleCell(barcode,
@@ -487,6 +512,13 @@ if __name__ == "__main__":
                      for barcode in valid_cells]
 
             print('%s valid cells found!' % len(cells))
+
+            if not dna_only:
+                # create table of per-cell ab counts for valid cells only
+                resources.umi_counts_by_cell(umi_counts_merged,
+                                             ab_barcode_csv_file,
+                                             ab_dir,
+                                             cells)
 
             print('''
 ###################################################################################
@@ -508,7 +540,7 @@ if __name__ == "__main__":
             # split files by cell barcode using bbmap demuxbyname.sh
             split_files = []
             for tube in tubes:
-                demux_cmd = 'demuxbyname.sh prefixmode=f length=%d in1=%s in2=%s out=%s names=%s' % (
+                demux_cmd = 'demuxbyname.sh prefixmode=f -Xmx10g length=%d in1=%s in2=%s out=%s names=%s' % (
                     bar_length[0],
                     tube.panel_r1_temp,
                     tube.panel_r2_temp,
@@ -528,7 +560,7 @@ if __name__ == "__main__":
 ''')
 
             # limit number of cells to preprocess at a time (based on hardware limitations)
-            n_preprocess = 100  #300 for greyhound
+            n_preprocess = 100  #100/300 standard/greyhound
             if n_preprocess > len(cells):
                 n_preprocess = len(cells)
 
@@ -548,7 +580,7 @@ if __name__ == "__main__":
                 preprocess_pool = ThreadPool(processes=n_preprocess)
 
                 for c in cells:
-                    preprocess_pool.apply_async(resources.SingleCell.call_flt3, args=(c, human_fasta_file,))
+                    preprocess_pool.apply_async(resources.SingleCell.call_flt3, args=(c, ref_fasta_file,))
 
                 preprocess_pool.close()
                 preprocess_pool.join()
@@ -563,7 +595,7 @@ if __name__ == "__main__":
 ''')
 
             # limit number of cells to call variants at a time (based on hardware limitations)
-            n_call_variants = 30   #70 for greyhound
+            n_call_variants = 30   #30/70 standard/greyhound
             if n_call_variants > len(cells):
                 n_call_variants = len(cells)
 
@@ -572,17 +604,26 @@ if __name__ == "__main__":
 
             for c in cells:
                 call_variants_pool.apply_async(resources.SingleCell.call_variants, args=(c,
-                                                                                         human_fasta_file,
-                                                                                         interval_file,))
+                                                                                         ref_fasta_file,
+                                                                                         interval_file,
+                                                                                         ploidy,))
 
             call_variants_pool.close()
             call_variants_pool.join()
+
+        # send slack notification
+        elapsed_time = time.time() - start_time
+        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+        slack_message('Barcoding complete for sample %s! Total elapsed time is %s.' % (sample_name,
+                                                                                       elapsed_time_fmt),
+                      slack_enabled,
+                      slack_token)
 
 ########################################################################################################################
 #                                                   GENOTYPING
 ########################################################################################################################
 
-    elif pipeline_mode == 'genotype':
+    if pipeline_mode == 'genotype' or pipeline_mode == 'both':
 
         print('''
 ####################################################################################
@@ -644,7 +685,7 @@ if __name__ == "__main__":
 
                 itd_files.append([itd_folder + b + '.flt3itd.vcf' for b in s_itd])
 
-        # base path for genomics db
+        # # base path for genomics db
         db_dir = cohort_genotyping_dir + 'dbs/'
         if os.path.exists(db_dir):
             print('The genomics DB directory %s already exists. Please delete or rename it.\n' % db_dir)
@@ -699,7 +740,7 @@ if __name__ == "__main__":
 ''')
 
         # limit number of intervals to import at a time (based on hardware limitations)
-        n_import = 30       #60 on greyhound
+        n_import = 30       #30/60 standard/greyhound
         if n_import > len(intervals):
             n_import = len(intervals)
 
@@ -722,7 +763,7 @@ if __name__ == "__main__":
 ''')
 
         # limit number of intervals to import at a time (based on hardware limitations)
-        n_genotype = 30     #60 on greyhound
+        n_genotype = 30     #30/60 standard/greyhound
         if n_genotype > len(intervals):
             n_genotype = len(intervals)
 
@@ -732,10 +773,10 @@ if __name__ == "__main__":
         # joint genotype intervals
         for L in intervals:
             genotype_pool.apply_async(resources.joint_genotype, args=('gendb://' + db_paths[L],
-                                                                      human_fasta_file,
+                                                                      ref_fasta_file,
                                                                       intervals[L],
                                                                       output_vcfs[L],
-                                                                      ))
+                                                                      ploidy,))
 
         genotype_pool.close()
         genotype_pool.join()
@@ -754,19 +795,21 @@ if __name__ == "__main__":
 
         print('''
 ####################################################################################
-# split multiallelic sites and annotate vcf
+# split multiallelic sites and annotate vcf (human reference only)
 ####################################################################################
 ''')
 
         # split multiallelics, left-align, and trim
-        resources.left_align_trim(human_fasta_file, genotyped_vcf, split_vcf)
+        resources.left_align_trim(ref_fasta_file, genotyped_vcf, split_vcf)
 
-        # annotate vcf with snpeff (functional predictions)
-        resources.snpeff_annotate(snpeff_summary, snpeff_config_file, split_vcf, snpeff_annot_vcf)
+        if not non_human:
 
-        # annotate with bcftools
-        # use clinvar database
-        resources.bcftools_annotate(clinvar_vcf_file, snpeff_annot_vcf, '-c INFO', annot_vcf)
+            # annotate vcf with snpeff (functional predictions)
+            resources.snpeff_annotate(snpeff_summary, snpeff_human_config_file, split_vcf, snpeff_annot_vcf)
+    
+            # annotate with bcftools
+            # use clinvar database
+            resources.bcftools_annotate(clinvar_human_vcf_file, snpeff_annot_vcf, '-c INFO', annot_vcf)
 
         print('''
 ####################################################################################
@@ -778,7 +821,7 @@ if __name__ == "__main__":
 
         # combine flt3 itd vcf files from all samples
         # only include variants with sufficient read depth
-        if not skip_flt3:
+        if not skip_flt3 and not non_human:
             with open(flt3_vcf, 'w') as v:
                 header = True
                 for i in range(len(sample_names)):
@@ -805,14 +848,34 @@ if __name__ == "__main__":
                                     else:
                                         break
 
-            resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv, flt3_vcf)
+            resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv, ploidy, flt3_vcf, non_human=False)
 
-        # no flt3 itd calling
-        else:
-            resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv)
+        # no flt3 itd calling with human samples
+        elif not non_human:
+            resources.vcf_to_tables(annot_vcf, geno_hdf5, variants_tsv, ploidy, itd_vcf_file=False, non_human=False)
+
+        # non-human samples
+        elif non_human:
+            resources.vcf_to_tables(split_vcf, geno_hdf5, variants_tsv, ploidy, itd_vcf_file=False, non_human=True)
+
+        # if abs in experiment, add counts to hdf5 file
+        if not dna_only:
+            ab_count_dirs = [cohort_dir + s + '/abs/by_method.CELLS/' for s in sample_names]
+            resources.add_hdf5_ab_counts(geno_hdf5, sample_names, ab_count_dirs)
 
         # compress the final annotated vcf to reduce size
-        subprocess.call('pigz -p 8 -f %s' % annot_vcf, shell=True)
+        if non_human:
+            subprocess.call('pigz -p 8 -f %s' % split_vcf, shell=True)
+        else:
+            subprocess.call('pigz -p 8 -f %s' % annot_vcf, shell=True)
+
+        # send slack notification
+        elapsed_time = time.time() - start_time
+        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
+        slack_message('Genotyping pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name,
+                                                                                                 elapsed_time_fmt),
+                      slack_enabled,
+                      slack_token)
 
 ########################################################################################################################
 
@@ -820,24 +883,37 @@ if __name__ == "__main__":
     if file_cleanup:
 
         # remove temp folder from barcoding mode
-        if pipeline_mode == 'barcode':
+        if pipeline_mode == 'barcode' or pipeline_mode == 'both':
             try:
                 shutil.rmtree(temp_dir)
             except OSError:
                 pass
 
         # remove temp files from genotyping mode
-        if pipeline_mode == 'genotype':
-            try:
-                os.remove(sample_map)
-                os.remove(genotyped_vcf)
-                os.remove(genotyped_vcf + '.idx')
-                os.remove(split_vcf)
-                os.remove(snpeff_annot_vcf + '.gz')
-                os.remove(snpeff_annot_vcf + '.gz.tbi')
+        if pipeline_mode == 'genotype' or pipeline_mode == 'both':
 
-            except OSError:
-                pass
+            # remove limited files for non-human samples
+            if non_human:
+                try:
+                    os.remove(sample_map)
+                    os.remove(genotyped_vcf)
+                    os.remove(genotyped_vcf + '.idx')
+
+                except OSError:
+                    pass
+
+            # human samples (additional files to remove)
+            else:
+                try:
+                    os.remove(sample_map)
+                    os.remove(genotyped_vcf)
+                    os.remove(genotyped_vcf + '.idx')
+                    os.remove(split_vcf)
+                    os.remove(snpeff_annot_vcf + '.gz')
+                    os.remove(snpeff_annot_vcf + '.gz.tbi')
+
+                except OSError:
+                    pass
 
             # remove single-interval vcfs and dbs
             try:
@@ -847,21 +923,3 @@ if __name__ == "__main__":
                 pass
 
     print('Pipeline complete!\n')
-
-    if pipeline_mode == 'barcode':
-
-        # send slack notification
-        elapsed_time = time.time() - start_time
-        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.localtime(elapsed_time)))
-        slack_message('Barcoding pipeline complete for sample %s! Total elapsed time is %s.' % (sample_name, elapsed_time_fmt),
-                      slack_enabled,
-                      slack_token)
-
-    elif pipeline_mode == 'genotype':
-
-        # send slack notification
-        elapsed_time = time.time() - start_time
-        elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.localtime(elapsed_time)))
-        slack_message('Genotyping pipeline complete for cohort %s! Total elapsed time is %s.' % (cohort_name, elapsed_time_fmt),
-                      slack_enabled,
-                      slack_token)

@@ -28,7 +28,7 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     # set parameters for coverage minimums (applied when threshold is True)
 
     # minimum coverage for an interval
-    min_coverage = 8
+    min_coverage = 10
 
     # minimum fraction of intervals with min_coverage
     min_fraction = 0.6
@@ -91,17 +91,18 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
             method = 'simple_minimum'
 
     if method == 'simple_minimum':
-        # this method uses a simple minimum to call cells
+        # this method uses a simple minimum number of reads per cells to call cells
+        # min_reads_per_cell = min_coverage * min_fraction * num_targets
 
         num_targets = len(all_df.columns) - 1
         min_reads_per_cell = min_coverage * min_fraction * num_targets
         cell_barcodes = [barcodes[i] for i in range(len(barcodes)) if reads_per_cell[i] >= min_reads_per_cell]
 
     if method not in calling_methods:
-        print 'Invalid method selected. Exiting...'
+        print('Invalid method selected. Exiting...')
         raise SystemExit
 
-    # if thresholding is on, further filter cells according to coverage
+    # if uniformity thresholding is on, further filter cells according to coverage
     if threshold:
         valid_cells = []
         for c in cell_barcodes:
@@ -114,7 +115,7 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
         valid_cells = cell_barcodes
 
     # save cell barcode file
-    cell_df = all_df[all_df.index.isin(valid_cells)]
+    cell_df = (all_df[all_df.index.isin(valid_cells)]).sort_index()
     cell_tsv = output_folder + experiment_name + '.cells.tsv'
     cell_df.to_csv(path_or_buf=cell_tsv, sep='\t')
 
