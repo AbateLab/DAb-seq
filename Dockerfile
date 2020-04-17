@@ -121,6 +121,10 @@ RUN pip install future
 RUN pip install matplotlib
 RUN pip install slackclient
 
+# set input directories to fully open - so any user can write
+RUN mkdir /input
+RUN chmod -R 777 /input
+
 ### get dab-seq private repo files
 # before building: export SSH_PRIVATE_KEY="$(cat /home/bdemaree/.ssh/dab_seq_key)"
 ARG SSH_PRIVATE_KEY
@@ -132,7 +136,3 @@ RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 WORKDIR /dabseq/pipeline
 RUN git clone git@github.com:AbateLab/DAb-seq
 ENTRYPOINT ["python", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
-
-# set input directories to fully open - so any user can write
-RUN mkdir /input
-RUN chmod -R 777 /input
