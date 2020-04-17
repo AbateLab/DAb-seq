@@ -1,5 +1,7 @@
 # DAb-seq
-DAb-seq: combined single-cell DNA and Antibody sequencing.
+<i>DAb-seq: combined single-cell DNA and Antibody sequencing.</i>
+
+View the current version of the [DAb-seq manuscript](https://www.biorxiv.org/content/10.1101/2020.02.26.967133v1) on BioRxiv. 
 
 ## Introduction
 
@@ -91,3 +93,7 @@ Output genotyping data is saved in a new directory labeled `GENOTYPING` in the r
 * No Call (3)
 
 Further details on reading and manipulating data from this file can be found in the included Python notebooks.
+
+## Non-Human Organism Support
+
+The DAb-seq pipeline includes support for non-human organisms using th flag `--non-human`. When combined with additional settings such as `--ploidy 1`, the pipeline can be used to perform single-cell genotyping on haploid bacteria and yeast cells.
