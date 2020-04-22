@@ -577,6 +577,10 @@ if __name__ == "__main__":
             # optionally, call FLT3-ITDs using ITDseek
             if not skip_flt3:
 
+                # verify flt3 folder is empty before continuing (remove and recreate folder)
+                shutil.rmtree(by_cell_flt3_dir)
+                os.mkdir(by_cell_flt3_dir)
+
                 preprocess_pool = ThreadPool(processes=n_preprocess)
 
                 for c in cells:
@@ -593,6 +597,10 @@ if __name__ == "__main__":
 # perform variant calling for all cells
 ####################################################################################
 ''')
+
+            # verify gvcf folder is empty before continuing (remove and recreate folder)
+            shutil.rmtree(by_cell_gvcf_dir)
+            os.mkdir(by_cell_gvcf_dir)
 
             # limit number of cells to call variants at a time (based on hardware limitations)
             n_call_variants = 30   #30/70 standard/greyhound
