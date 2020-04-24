@@ -120,6 +120,11 @@ if __name__ == "__main__":
         print('Please specify a valid sample name when barcoding.')
         raise SystemExit
 
+    # sample and cohort name cannot include dashes
+    if '-' in sample_name or '-' in cohort_name:
+        print('Sample and cohort names cannot contain a dash (-).')
+        raise SystemExit
+
     # check for config file
     if not os.path.isfile(cfg_f):
         print('Config file not found! Please check the file name and path.')
