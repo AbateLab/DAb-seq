@@ -95,7 +95,7 @@ RUN snpEff download hg19
 WORKDIR /dabseq/references
 
 # get clinvar db
-RUN wget -q --show-progress --progress=bar:force:noscroll https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh37/clinvar_20200329.vcf.gz
+RUN wget -q --show-progress --progress=bar:force:noscroll https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh37/archive_2.0/2020/clinvar_20200329.vcf.gz
 RUN gunzip clinvar_20200329.vcf.gz
 RUN awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' clinvar_20200329.vcf > clinvar_20200329.chr.vcf
 RUN bgzip -f -@ 16 clinvar_20200329.chr.vcf
