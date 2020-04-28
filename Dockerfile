@@ -79,6 +79,8 @@ RUN gunzip BBMap_38.57.tar.gz
 RUN tar -xf BBMap_38.57.tar
 ENV PATH "$PATH:/dabseq/programs/bbmap"
 
+# the following section is only needed for builds using a human reference
+
 # idtseek
 RUN git clone https://github.com/tommyau/itdseek
 ENV PATH "$PATH:/dabseq/programs/itdseek"
@@ -101,13 +103,17 @@ RUN awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' clinvar_20200329.vcf > c
 RUN bgzip -f -@ 16 clinvar_20200329.chr.vcf
 RUN tabix clinvar_20200329.chr.vcf.gz
 
-# get hg19 fasta and build indices
+# get hg19 fasta and pre-built index
 RUN wget -q --show-progress --progress=bar:force:noscroll ftp://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz
 RUN gunzip hg19.fa.gz
 RUN mv hg19.fa hg19.fasta
 RUN gatk CreateSequenceDictionary -R hg19.fasta
 RUN samtools faidx hg19.fasta
-RUN bowtie2-build hg19.fasta hg19 --threads 24
+RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/asqiuaiyzvqnkj0/hg19_bt2.tar.gz?dl=0 -O hg19_bt2.tar.gz
+RUN gunzip hg19_bt2.tar.gz
+RUN tar -xf hg19_bt2.tar
+RUN rm hg19_bt2.tar
+RUN mv hg19_bt2/*.bt2 .
 
 ### install missing python modules
 RUN pip3 install cutadapt
