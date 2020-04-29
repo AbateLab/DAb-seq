@@ -103,12 +103,15 @@ RUN awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' clinvar_20200329.vcf > c
 RUN bgzip -f -@ 16 clinvar_20200329.chr.vcf
 RUN tabix clinvar_20200329.chr.vcf.gz
 
-# get hg19 fasta and pre-built index
+# get hg19 fasta and pre-built indices
+# need to download pre-built files to avoid out-of-memory error on Docker Hub
 RUN wget -q --show-progress --progress=bar:force:noscroll ftp://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz
 RUN gunzip hg19.fa.gz
 RUN mv hg19.fa hg19.fasta
-RUN gatk CreateSequenceDictionary -R hg19.fasta
-RUN samtools faidx hg19.fasta
+#RUN gatk CreateSequenceDictionary -R hg19.fasta
+#RUN samtools faidx hg19.fasta
+RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/6yzq1n5fwtp06hf/hg19.dict?dl=0 -O hg19.dict
+RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/jbfyt5uz7jnfrm1/hg19.fasta.fai?dl=0 -O hg19.fasta
 RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/asqiuaiyzvqnkj0/hg19_bt2.tar.gz?dl=0 -O hg19_bt2.tar.gz
 RUN gunzip hg19_bt2.tar.gz
 RUN tar -xf hg19_bt2.tar
