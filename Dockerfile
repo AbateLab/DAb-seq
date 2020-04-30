@@ -2,7 +2,7 @@
 # Ben Demaree 3.30.2020
 
 # start with ubuntu base
-FROM ubuntu:18.04
+FROM ubuntu:18.04 AS base-build
 
 ### install linux dependencies
 RUN apt-get -y update
@@ -79,44 +79,12 @@ RUN gunzip BBMap_38.57.tar.gz
 RUN tar -xf BBMap_38.57.tar
 ENV PATH "$PATH:/dabseq/programs/bbmap"
 
-# the following section is only needed for builds using a human reference
-
-# idtseek
-RUN git clone https://github.com/tommyau/itdseek
-ENV PATH "$PATH:/dabseq/programs/itdseek"
-
-# snpeff
-RUN wget -q --show-progress --progress=bar:force:noscroll http://sourceforge.net/projects/snpeff/files/snpEff_latest_core.zip
-RUN unzip snpEff_latest_core.zip
-ENV PATH "$PATH:/dabseq/programs/snpEff"
-ENV PATH "$PATH:/dabseq/programs/snpEff/scripts"
-# install snpEff database for hg19
-RUN snpEff download hg19
-
-### download genome reference files
-WORKDIR /dabseq/references
-
-# get clinvar db
-RUN wget -q --show-progress --progress=bar:force:noscroll https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh37/archive_2.0/2020/clinvar_20200329.vcf.gz
-RUN gunzip clinvar_20200329.vcf.gz
-RUN awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' clinvar_20200329.vcf > clinvar_20200329.chr.vcf
-RUN bgzip -f -@ 16 clinvar_20200329.chr.vcf
-RUN tabix clinvar_20200329.chr.vcf.gz
-
-# get hg19 fasta and pre-built indices
-# need to download pre-built files to avoid out-of-memory error on Docker Hub
-RUN wget -q --show-progress --progress=bar:force:noscroll ftp://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz
-RUN gunzip hg19.fa.gz
-RUN mv hg19.fa hg19.fasta
-#RUN gatk CreateSequenceDictionary -R hg19.fasta
-#RUN samtools faidx hg19.fasta
-RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/6yzq1n5fwtp06hf/hg19.dict?dl=0 -O hg19.dict
-RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/jbfyt5uz7jnfrm1/hg19.fasta.fai?dl=0 -O hg19.fasta
-RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/asqiuaiyzvqnkj0/hg19_bt2.tar.gz?dl=0 -O hg19_bt2.tar.gz
-RUN gunzip hg19_bt2.tar.gz
-RUN tar -xf hg19_bt2.tar
-RUN rm hg19_bt2.tar
-RUN mv hg19_bt2/*.bt2 .
+# cleanup installation files
+RUN rm *.zip
+RUN rm *.bz2
+RUN rm *.tar
+RUN rm -rf htslib-1.9/
+RUN rm -rf samtools-1.8/
 
 ### install missing python modules
 RUN pip3 install cutadapt
@@ -145,3 +113,49 @@ RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 WORKDIR /dabseq/pipeline
 RUN git clone git@github.com:AbateLab/DAb-seq
 ENTRYPOINT ["python", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
+
+FROM base-build AS human-build
+
+# the following section is only needed for builds using a human reference
+########################################################################################################################
+
+WORKDIR /dabseq/programs
+
+# idtseek
+RUN git clone https://github.com/tommyau/itdseek
+ENV PATH "$PATH:/dabseq/programs/itdseek"
+
+# snpeff
+RUN wget -q --show-progress --progress=bar:force:noscroll http://sourceforge.net/projects/snpeff/files/snpEff_latest_core.zip
+RUN unzip snpEff_latest_core.zip
+RUN rm snpEff_latest_core.zip
+ENV PATH "$PATH:/dabseq/programs/snpEff"
+ENV PATH "$PATH:/dabseq/programs/snpEff/scripts"
+# install snpEff database for hg19
+RUN snpEff download hg19
+
+### download genome reference files
+WORKDIR /dabseq/references
+
+# get clinvar db
+RUN wget -q --show-progress --progress=bar:force:noscroll https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh37/archive_2.0/2020/clinvar_20200329.vcf.gz
+RUN gunzip clinvar_20200329.vcf.gz
+RUN awk '{if($0 !~ /^#/) print "chr"$0; else print $0}' clinvar_20200329.vcf > clinvar_20200329.chr.vcf
+RUN rm clinvar_20200329.vcf
+RUN bgzip -f -@ 16 clinvar_20200329.chr.vcf
+RUN tabix clinvar_20200329.chr.vcf.gz
+
+# get hg19 fasta and pre-built indices
+# need to download pre-built files to avoid out-of-memory error on Docker Hub
+RUN wget -q --show-progress --progress=bar:force:noscroll ftp://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz -O hg19.fasta.gz
+RUN gunzip hg19.fasta.gz
+#RUN gatk CreateSequenceDictionary -R hg19.fasta
+#RUN samtools faidx hg19.fasta
+RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/6yzq1n5fwtp06hf/hg19.dict?dl=0 -O hg19.dict
+RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/jbfyt5uz7jnfrm1/hg19.fasta.fai?dl=0 -O hg19.fasta
+RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/asqiuaiyzvqnkj0/hg19_bt2.tar.gz?dl=0 -O hg19_bt2.tar.gz
+RUN gunzip hg19_bt2.tar.gz
+RUN tar -xf hg19_bt2.tar
+RUN rm hg19_bt2.tar
+RUN mv hg19_bt2/*.bt2 .
+########################################################################################################################
