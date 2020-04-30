@@ -120,10 +120,15 @@ if __name__ == "__main__":
         print('Please specify a valid sample name when barcoding.')
         raise SystemExit
 
-    # sample and cohort name cannot include dashes
-    if '-' in sample_name or '-' in cohort_name:
-        print('Sample and cohort names cannot contain a dash (-).')
+    # cohort and sample names cannot include dashes
+    if '-' in cohort_name:
+        print('Cohort name cannot contain a dash (-).')
         raise SystemExit
+
+    if pipeline_mode is not 'genotype':
+        if '-' in sample_name:
+            print('Sample name cannot contain a dash (-).')
+            raise SystemExit
 
     # check for config file
     if not os.path.isfile(cfg_f):
@@ -602,6 +607,10 @@ if __name__ == "__main__":
 # perform variant calling for all cells
 ####################################################################################
 ''')
+            # delete by-cell fastq directory to save space
+            assert 2 * len(os.listdir(by_cell_fastq_dir)) == len(os.listdir(by_cell_bam_dir)),\
+                'Number of single-cell files in FASTQ directory is inconsistent with the number in the BAM directory.'
+            shutil.rmtree(by_cell_fastq_dir)
 
             # verify gvcf folder is empty before continuing (remove and recreate folder)
             shutil.rmtree(by_cell_gvcf_dir)
