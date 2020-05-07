@@ -125,7 +125,7 @@ if __name__ == "__main__":
         print('Cohort name cannot contain a dash (-).')
         raise SystemExit
 
-    if pipeline_mode is not 'genotype':
+    if pipeline_mode == 'barcode' or pipeline_mode == 'both':
         if '-' in sample_name:
             print('Sample name cannot contain a dash (-).')
             raise SystemExit
