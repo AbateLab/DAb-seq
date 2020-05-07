@@ -5,12 +5,12 @@ View the current version of the [DAb-seq manuscript](https://www.biorxiv.org/con
 
 ## Introduction
 
-DAb-seq is a multiomic platform combining targeted genotyping and immunophenotyping at the single-cell level. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analagous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
+DAb-seq is a multiomic platform combining targeted genotyping and immunophenotyping at the single-cell level. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analogous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
 
 ![DAb-seq Workflow](https://i.imgur.com/2Z2GTey.png)
 <p align="center"><i>The experimental DAb-seq workflow, from sample collection to bioinformatics.</i><br></p>
 
-The DAb-seq data analysis pipeline incoporates elements of targeted DNA genotyping and digital fragment counting, as in RNA-seq. The primary output of the pipeline is a genotyping matrix of calls by cell, and a counts matrix of antibody UMI counts by cell.
+The DAb-seq data analysis pipeline incorporates elements of targeted DNA genotyping and digital fragment counting, as in RNA-seq. The primary output of the pipeline is a genotyping matrix of calls by cell, and a counts matrix of antibody UMI counts by cell.
 
 ## Input File Requirements
 
