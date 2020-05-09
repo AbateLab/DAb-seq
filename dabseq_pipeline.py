@@ -29,11 +29,15 @@ def slack_message(message, enabled=False, slack_token=None):
         channel = 'server-alerts'
         sc = SlackClient(slack_token)
 
-        sc.api_call('chat.postMessage',
-                    channel=channel,
-                    text=message,
-                    username='pipelines',
-                    icon_emoji=':adam:')
+        try:
+            sc.api_call('chat.postMessage',
+                        channel=channel,
+                        text=message,
+                        username='pipelines',
+                        icon_emoji=':adam:')
+
+        except:
+            print('Slack error. Continuing...')
 
     else:
         pass
