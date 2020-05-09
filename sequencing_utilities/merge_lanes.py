@@ -14,11 +14,10 @@ import shutil
 
 if __name__ == "__main__":
 
-    input_folder = '<input_folder>'
-    output_folder = '<output_folder>'
+    input_folder = '/drive4/harish_novaseq/repaired'
+    output_folder = '/drive4/harish_novaseq/merged'
 
     samples = list(set([f.split('_')[0] for f in os.listdir(input_folder) if '.fastq.gz' in f]))
-
 
     try:
         os.mkdir(output_folder)
