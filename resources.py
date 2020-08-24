@@ -86,6 +86,11 @@ class TapestriTube(object):
             r1_out = open(self.panel_r1_temp, 'w')
             r2_out = open(self.panel_r2_temp, 'w')
 
+            trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -U 5 -n 2 %s %s --quiet' % (r1_end,
+                                                                                                  r2_end,
+                                                                                                  r1_in,
+                                                                                                  r2_in)
+
         elif library_type == 'ab':
 
             r1_in = self.ab_r1
@@ -94,20 +99,21 @@ class TapestriTube(object):
             r1_out = open(self.ab_r1_temp, 'w')
             r2_out = open(self.ab_r2_temp, 'w')
 
+            trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -n 2 %s %s --quiet' % (r1_end,
+                                                                                             r2_end,
+                                                                                             r1_in,
+                                                                                             r2_in)
+
         # trim 5' end of read and check barcode
         bar_cmd = 'cutadapt -a %s -O 8 -e 0.2 %s -j 8 --quiet' % (r1_start,
                                                                   r1_in)
+
         bar_file = subprocess.Popen(bar_cmd, stdout=subprocess.PIPE, shell=True)
 
-        # hard trimming (55 bp off R1, 5 bp off R2) is used to ensure entire cell barcode region is removed
+        # hard trimming (55 bp off R1, 5 bp off R2 for panel) is used to ensure entire cell barcode region is removed
         # barcode bases for V1 chemistry: 47 bp
         # max barcode bases for V2 chemistry: 50 bp
 
-        # trimmed reads output
-        trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -U 5 -n 2 %s %s --quiet' % (r1_end,
-                                                                                              r2_end,
-                                                                                              r1_in,
-                                                                                              r2_in)
         trim_file = subprocess.Popen(trim_cmd, stdout=subprocess.PIPE, shell=True)
 
         total_reads = 0     # total count of all reads
@@ -196,11 +202,9 @@ class TapestriTube(object):
 
                     valid_reads += 1
 
-                    # print counter
-                    if valid_reads % 1e6 == 0:
-                        print('Tube %d-%s: %d valid trimmed pairs saved to file.' % (self.tube_num,
-                                                                                       library_type,
-                                                                                       valid_reads))
+        print('Tube %d-%s: %d valid trimmed pairs saved to file.' % (self.tube_num,
+                                                                     library_type,
+                                                                     valid_reads))
 
     def process_abs(self,
                     ab_barcodes,
@@ -215,12 +219,15 @@ class TapestriTube(object):
         ab_reads_file = open(self.ab_reads, 'w')
 
         # use cutadapt to select reads with correct structure
-        ab_cmd = 'cutadapt -j 8 %s -O 12 -e 0.2 -n 2 %s --quiet --discard-untrimmed' % (ab_handles,
+        ab_cmd = 'cutadapt -j 8 %s -O 12 -e 0.2 -n %d %s --quiet --discard-untrimmed' % (ab_handles,
+                                                                                         len(ab_handles),
                                                                                          self.ab_r2_temp)
 
         ab_process = subprocess.Popen(ab_cmd, stdout=subprocess.PIPE, shell=True)
 
+        # count valid ab reads
         valid_ab_reads = 0
+        invalid_ab_reads = 0
 
         # iterate through ab reads with correct adapters
         for line in ab_process.stdout:
@@ -232,20 +239,34 @@ class TapestriTube(object):
             ab_process.stdout.next()
             qual = ab_process.stdout.next().strip()
 
-            # check trimmed read length
-            if len(seq) != len(ab_bar_coord + ab_umi_coord):
+            # try ab matching to custom or totalseq tags using read length
+            valid_length = False
+
+            # in range(len(ab_bar_coord))
+            for k in range(len(ab_bar_coord)):
+
+                # check trimmed read length
+                if len(seq) == len(ab_bar_coord[k] + ab_umi_coord[k]):
+                    valid_length = True
+                    break
+
+            # if sequence length is not valid, continue to next read
+            if not valid_length:
+                invalid_ab_reads += 1
                 continue
 
             # check ab barcode is valid
-            bar = ''.join([seq[i] for i in ab_bar_coord])
+            bar = ''.join([seq[i] for i in ab_bar_coord[k]])
             bar = correct_barcode(ab_barcodes, bar)
             if bar == 'invalid':
+                invalid_ab_reads += 1
                 continue
 
             # check umi quality
-            umi = ''.join([seq[i] for i in ab_umi_coord])
-            umi_qual = [ord(qual[i]) - 33 for i in ab_umi_coord]
+            umi = ''.join([seq[i] for i in ab_umi_coord[k]])
+            umi_qual = [ord(qual[i]) - 33 for i in ab_umi_coord[k]]
             if not all(q >= min_umi_qual for q in umi_qual):
+                invalid_ab_reads += 1
                 continue
 
             # if a read passes all filters, write it to file
@@ -255,6 +276,10 @@ class TapestriTube(object):
             ab_reads_file.write(umi + '\n')
 
         ab_reads_file.close()
+
+        # print number of valid/invalid ab reads
+        print('Tube ' + str(self.tube_num) + ': ' + str(valid_ab_reads) + ' VALID ab reads')
+        print('Tube ' + str(self.tube_num) + ': ' + str(invalid_ab_reads) + ' INVALID ab reads')
 
     def count_umis(self, clustering_method):
         # count umis using selected clustering methods
@@ -484,7 +509,7 @@ def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=Non
         umi_counts = umi_counts[umi_counts.index.isin(valid_barcodes)]
 
     # get all ab barcode descriptions in experiment
-    ab_barcodes = sorted(load_barcodes(ab_barcode_csv_file).values())
+    ab_barcodes = sorted(load_barcodes(ab_barcode_csv_file, 1, False).values())
 
     # for each method, save in a dataframe
     count_methods = [m for m in umi_counts.columns if 'ab_desc' not in m]
@@ -512,7 +537,7 @@ def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=Non
             count_method_file = os.path.basename(umi_counts_merged)[:-3] + m + '.all.tsv'
         ab_counts_by_method.to_csv(path_or_buf=ab_dir_by_method+count_method_file, sep='\t')
 
-def load_barcodes(barcode_file, max_dist=1, check_barcodes=True):
+def load_barcodes(barcode_file, max_dist, check_barcodes):
     # loads barcodes from csv and checks all pairwise distances to ensure error correction will work
     # returns a dictionary of barcodes with their descriptions
 
