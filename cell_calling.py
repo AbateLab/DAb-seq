@@ -177,7 +177,7 @@ def amplicon_boxplot(cell_df, output_file):
     # plot reads per cell for each amplicon in called cells
     plt.figure(figsize=(15, 7))
 
-    df = cell_df.reindex(cell_df.mean().sort_values(ascending=False).index, axis=1)  # sort columns by mean value
+    df = cell_df.reindex(cell_df.median().sort_values(ascending=False).index, axis=1)  # sort columns by median value
     amplicons = list(df.columns)  # amplicon names
 
     plt.boxplot(np.transpose(df), 0, '', boxprops=dict(facecolor='gainsboro', color='k'), patch_artist=True)
@@ -187,6 +187,11 @@ def amplicon_boxplot(cell_df, output_file):
     plt.xlim([0, len(amplicons) + 1])
     plt.ylabel('Number of Reads per Cell (N = %d)' % len(cell_df.index), fontsize=14, labelpad=20)
     plt.xlabel('Amplicon', fontsize=14, labelpad=20)
+
+    plt.plot(np.linspace(0, 10000, 10),
+             [0] * np.linspace(0, 10000, 10),
+             'k--',
+             linewidth=1)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300)
