@@ -54,7 +54,7 @@ if __name__ == "__main__":
     ben demaree 2020
     
     input requirements:
-    -config file defining file paths and variables (dabseq.cfg)
+    -config file defining file paths and variables (e.g. dabseq.hg19.cfg)
     -raw fastq files (targeted sequencing panel and/or antibody tags)
     -cell and ab barcode csvs
     -panel interval files
@@ -88,8 +88,13 @@ if __name__ == "__main__":
                         help='option to provide slack token string')
     parser.add_argument('--dna-only', action='store_true', default=False,
                         help='option to run dna panel pipeline only')
+    parser.add_argument('--dna-panel', type=str, default=None,
+                        help='basename (including path) of DNA panel BED files (exclude ".bed" and ".amplicons" '
+                             'extensions) - only required for DNA runs')
     parser.add_argument('--ab-only', action='store_true', default=False,
                         help='option to run ab panel pipeline only')
+    parser.add_argument('--ab-csv', type=str, default=None,
+                        help='ab barcode CSV file (required when processing ab reads)')
     parser.add_argument('--ab-method', type=str, default='all', choices=['unique', 'all'],
                         help='ab clustering method ("unique" or "all") (default: "all")')
     parser.add_argument('--skip-flt3', action='store_true', default=False,
@@ -113,7 +118,9 @@ if __name__ == "__main__":
     slack_token = args.slack_token
     clustering_method = args.ab_method
     dna_only = args.dna_only
+    dna_panel = args.dna_panel
     ab_only = args.ab_only
+    ab_barcode_csv = args.ab_csv
     skip_flt3 = args.skip_flt3
     non_human = args.non_human
     ignore_panel_uniformity = args.ignore_panel_uniformity
@@ -143,6 +150,12 @@ if __name__ == "__main__":
     if dna_only and ab_only:
         print('DNA-only and Ab-only options cannot be used simultaneously.')
         raise SystemExit
+
+    # require ab csv when processing ab reads
+    if not dna_only and pipeline_mode != 'genotype':
+        if ab_barcode_csv is None:
+            print('An antibody CSV barcode file is required when processing Ab reads.')
+            raise SystemExit
 
     # cannot perform genotyping in ab_only mode
     if (pipeline_mode == 'genotyping' or pipeline_mode == 'both') and ab_only:
@@ -217,9 +230,27 @@ if __name__ == "__main__":
         if not os.path.exists(f):
             missing_files.append(f)
 
+    # also check for dna bed files
+    if not ab_only:
+        # interval file path (EXCLUDING primer coordinates)
+        try:
+            interval_file = dna_panel + '.bed'
+            if not os.path.exists(interval_file):
+                missing_files.append(interval_file)
+        except TypeError:
+            missing_files.append('interval_file')
+
+        # amplicon file path (INCLUDING primer coordinates)
+        try:
+            amplicon_file = dna_panel + '.amplicons'
+            if not os.path.exists(amplicon_file):
+                missing_files.append(amplicon_file)
+        except TypeError:
+            missing_files.append('amplicons_file')
+
     # print missing files, if any, and exit
     if len(missing_files) > 0:
-        print('The following input files could not be found:')
+        print('\nThe following input files could not be found:')
         for f in missing_files:
             print(f)
         print('\nExiting...\n')
@@ -308,11 +339,11 @@ if __name__ == "__main__":
 
             bar_ind_1, bar_ind_2 = range(9), range(-9, 0)
 
-        # set minimum read lengths (should rarely need to be modified)
+        # set minimum sequence lengths after trimming (can be modified depending on read length)
         r1_min_len_panel = 30
-        r2_min_len_panel = 25
+        r2_min_len_panel = 30
         r1_min_len_ab = 0
-        r2_min_len_ab = 30
+        r2_min_len_ab = 20
 
         # send slack notification
         start_time = time.time()
@@ -321,12 +352,7 @@ if __name__ == "__main__":
                       slack_enabled,
                       slack_token)
 
-        print('''
-####################################################################################
-# get input file names and store in TapestriTube objects
-####################################################################################
-''')
-
+        # get input file names and store in TapestriTube objects
         R1_files, R2_files = [], []
 
         if not ab_only:
@@ -413,7 +439,6 @@ if __name__ == "__main__":
             p.join()
 
         if not dna_only:
-
             print('''
 ####################################################################################
 # import ab reads, error correct, and count
@@ -421,7 +446,7 @@ if __name__ == "__main__":
 ''')
 
             # load ab barcode csv file (with descriptions)
-            ab_barcodes = resources.load_barcodes(ab_barcode_csv_file, 1, False)
+            ab_barcodes = resources.load_barcodes(ab_barcode_csv, 1, False)
             barcode_descriptions = copy.deepcopy(ab_barcodes)
 
             # generate hamming dictionary for error correction
@@ -448,8 +473,8 @@ if __name__ == "__main__":
 
             # sort ab reads files
             sort_files = []
-            for t in tubes:
-                p = subprocess.Popen('sort --parallel=2 %s -o %s' % (t.ab_reads, t.ab_reads), shell=True)
+            for tube in tubes:
+                p = subprocess.Popen('sort --parallel=2 %s -o %s' % (tube.ab_reads, tube.ab_reads), shell=True)
                 sort_files.append(p)
 
             # wait for processes to finish
@@ -480,12 +505,11 @@ if __name__ == "__main__":
 
             # create table of per-cell ab counts for all barcodes
             resources.umi_counts_by_cell(umi_counts_merged,
-                                         ab_barcode_csv_file,
+                                         ab_barcode_csv,
                                          ab_dir,
                                          None)
 
         if not ab_only:
-
             print('''
 ###################################################################################
 # count read alignments to inserts
@@ -530,7 +554,7 @@ if __name__ == "__main__":
             if not dna_only:
                 # create table of per-cell ab counts for valid cells only
                 resources.umi_counts_by_cell(umi_counts_merged,
-                                             ab_barcode_csv_file,
+                                             ab_barcode_csv,
                                              ab_dir,
                                              cells)
 
