@@ -14,11 +14,9 @@ The DAb-seq data analysis pipeline incorporates elements of targeted DNA genotyp
 
 ## Input File Requirements
 
-The pipeline requires as input, at a minimum, a configuration file and paired-end, compressed FASTQ files (ending in ".fastq.gz").
+The pipeline requires a configuration file and paired-end, compressed FASTQ files (which must end in ".fastq.gz"), in addition to other mode-specific files. The configuration file is subdivided into sections for each analysis module (see the provided example, `dabseq.hg19.cfg`).
 
-The configuration file is subdivided into sections for each analysis module (see the provided example, `dabseq.cfg`). Users should be sure to indicate the correct panel files (.bed and .amplicons). Mission Bio's standard AML and tumor hotspot (THP) panels are built-in and need not be provided separately.
-
-The folder structure of the input FASTQ files needs to be set up in a specific way to allow the program to find everything. For a given cohort (CohortA) of samples to joint-genotype (Timepoint1 and Timepoint2), the folder should look like:
+The folder structure of the input FASTQ files needs to be set up in a specific way to allow the program to find everything. For a given cohort (CohortA) of samples to joint-genotype (Timepoint1 and Timepoint2), the folder structure should look like:
 ```
 Timepoint1 DNA Panel:   .../CohortA/Timepoint1/fastq/panel/<filename.fastq.gz>
 Timepoint1 Abs:         .../CohortA/Timepoint1/fastq/abs/<filename.fastq.gz>
@@ -62,14 +60,22 @@ In `genotype` mode, the pipeline calls variants for a single cohort, containing 
 
 Running the DAb-seq pipeline in a Docker container is recommended and ensures that the pipeline dependencies are installed and configured properly.
 
-1. Build the DAb-seq image using Docker (it will take some time to build the Bowtie2 index):
+1. Build the DAb-seq image using Docker:
 ```
-docker build <path_to_dabseq_repo> -t dab-seq:latest
+docker build <path_to_dabseq_repo> -t dab-seq:human
 ```
+
+Alternatively, pull the Docker image from Docker Hub:
+
+```
+docker pull bendemaree/dab-seq:human
+```
+
+There are two tags of the Docker image available: `base` and `human`. Any study involving human cells should use the `human` tag. The smaller `base` image is intended for non-human studies and does not include the hg19 FASTA file and associated indices.
 
 2. Organize the input files on the host machine in the same file structure as described in [Input File Requirements](##input-file-requirements).
 
-3. Edit the included bash script `run_dabseq_docker.sh` with the appropriate cohort and sample information. Samples to barcode can be added as needed. The user running the pipeline should also be specified. This user should also have read/write access to the input FASTQ files.
+3. Edit the included example bash script `run_dabseq_docker.sh` with the appropriate cohort and sample information. Samples to process should be added as needed. The user running the pipeline should also be specified. This user should also have read/write access to the input FASTQ files.
 
 4. Run `run_dabseq_docker.sh`. You may need to change the file permissions to allow execution before running (e.g. `chmod +x run_dabseq_docker.sh`).
 
@@ -96,4 +102,4 @@ Further details on reading and manipulating data from this file can be found in 
 
 ## Non-Human Organism Support
 
-The DAb-seq pipeline includes support for non-human organisms using th flag `--non-human`. When combined with additional settings such as `--ploidy 1`, the pipeline can be used to perform single-cell genotyping on haploid bacteria and yeast cells.
+The DAb-seq pipeline includes support for non-human organisms using the flag `--non-human`. When combined with additional settings such as `--ploidy 1`, the pipeline can be used to perform single-cell genotyping on haploid bacteria and yeast cells.
