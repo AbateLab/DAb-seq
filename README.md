@@ -1,8 +1,6 @@
 # DAb-seq
 <i>DAb-seq: combined single-cell DNA and Antibody sequencing.</i>
 
-View the current version of the [DAb-seq manuscript](https://www.biorxiv.org/content/10.1101/2020.02.26.967133v1) on BioRxiv. 
-
 ## Introduction
 
 DAb-seq is a multiomic platform combining targeted genotyping and immunophenotyping at the single-cell level. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analogous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
@@ -103,3 +101,7 @@ Further details on reading and manipulating data from this file can be found in 
 ## Non-Human Organism Support
 
 The DAb-seq pipeline includes support for non-human organisms using the flag `--non-human`. When combined with additional settings such as `--ploidy 1`, the pipeline can be used to perform single-cell genotyping on haploid bacteria and yeast cells.
+
+## Sequencing Data
+
+All data from the initial DAb-seq publication is available in FASTQ format at on the [NCBI Sequence Read Archive](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA602320). In addition, the compressed HDF5 file for the three cell line validation experiment is included in this repositiory as sample data (3_cell_experiment.hdf5).
