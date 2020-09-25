@@ -7,7 +7,7 @@
 USER=bdemaree
 
 # base input/output directory
-BASE_DIR=/drive3/smith_lab/cohorts
+BASE_DIR=/drive3/dabseq/cohorts
 
 # cohort name and directory
 COHORT_NAME=hashing_pilot_1
@@ -19,12 +19,12 @@ SAMPLE_NAME_1=all_tubes
 
 # directory containing files for this run
 # will be mounted into container at /dabseq/config
-RUN_DIR=/home/bdemaree/code/dab-seq/runs/totalseq_pilot_1
+RUN_DIR=/home/bdemaree/code/dab-seq/runs/dabseq
 
 # files in run directory needed for processing
 CFG_FILE=dabseq.hg19.cfg
 AB_CSV_FILE=ab_barcodes_hashpilot1.csv
-DNA_PANEL_FILE=UCSF_CathySmith.final
+DNA_PANEL_FILE=AML
 
 # container to run
 CONTAINER=bendemaree/dab-seq:human
