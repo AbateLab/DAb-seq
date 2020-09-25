@@ -585,7 +585,7 @@ def hamming_circle(s, n):
     # generate strings over alphabet whose hamming distance from s is exactly n
     # from https://codereview.stackexchange.com/a/88919
 
-    alphabet = 'ATCG'
+    alphabet = 'ATCGN'
     s = s.upper()
 
     for positions in combinations(range(len(s)), n):
