@@ -97,6 +97,7 @@ RUN pip install h5py
 RUN pip install future
 RUN pip install matplotlib
 RUN pip install slackclient
+RUN pip3 install seaborn
 
 # set input directories to fully open - so any user can write
 RUN mkdir /input

@@ -24,6 +24,8 @@ import copy
 import allel
 import pandas as pd
 import h5py
+import statsmodels.api as sm
+from scipy.stats.mstats import gmean
 
 # add the modified umi_tools directory to python path
 sys.path.append(os.path.join(sys.path[0], 'umi_tools'))
@@ -537,6 +539,39 @@ def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=Non
             count_method_file = os.path.basename(umi_counts_merged)[:-3] + m + '.all.tsv'
         ab_counts_by_method.to_csv(path_or_buf=ab_dir_by_method+count_method_file, sep='\t')
 
+    # calculate clr for cells only
+    if cells is not None:
+        clr_count_file = ab_dir_by_method + os.path.basename(umi_counts_merged)[:-3] + 'clr.cells.tsv'
+    else:
+        return
+
+    # for clr, use 'adjacency' counts
+    # if not available, use 'unique'
+    if 'adjacency' in count_methods:
+        count_method_file = ab_dir_by_method + os.path.basename(umi_counts_merged)[:-3] + 'adjacency.cells.tsv'
+
+    else:
+        count_method_file = ab_dir_by_method + os.path.basename(umi_counts_merged)[:-3] + 'unique.cells.tsv'
+
+    ab_counts = pd.read_csv(count_method_file, sep='\t', header=0, index_col=0)
+
+    # calculate centered-log ratio transform (CLR) of ab counts
+    # from cite-seq paper: CLR(x) = [ln(x1/g(x)), ln(x2/g(x)), ...]
+    # where x is a vector of ab counts per cell, and g(x) is the geometric mean of counts per cell
+    # note that unique ab counts (adjacency method) are used for the calculation
+
+    # add pseudocount to ab counts table
+    ab_counts_pseudo = ab_counts + 1
+
+    # calculate geometric mean of each cell
+    gmeans = gmean(ab_counts_pseudo, axis=1)
+
+    # divide all cells by geometric mean and take natural log to yield clr
+    ab_counts_clr = np.log(ab_counts_pseudo.divide(gmeans, axis=0))
+
+    # save clr counts to file
+    ab_counts_clr.to_csv(path_or_buf=clr_count_file, sep='\t')
+
 def load_barcodes(barcode_file, max_dist, check_barcodes):
     # loads barcodes from csv and checks all pairwise distances to ensure error correction will work
     # returns a dictionary of barcodes with their descriptions
@@ -969,6 +1004,85 @@ def add_hdf5_ab_counts(geno_hdf5, sample_names, ab_count_dirs):
         with h5py.File(geno_hdf5, 'a') as f:
             dataset = np.asarray(count_methods_by_sample[m].reindex(cell_barcodes))
             f.create_dataset('ABS/'+m, data=dataset, dtype='i4', compression='gzip')
+
+def GLM_regression(hdf5_path, covariables, antibodies=[], components=1, offset=False):
+    '''Perform general linear model regression of each Ab vector with provided covariables.
+    Currently supported covariables are a subset from: ['IgG1','amplicon_total','ab_total_raw','ab_total_umi'].
+    Covariables are SVD transformed and the first N components are retained (default 1).
+    Currently uses linear regression on log transformed data and a Gaussian error model.'''
+
+    cell_barcodes = [c.decode('utf8') for c in h5py.File(hdf5_path)['CELL_BARCODES']]
+
+    # dna panel
+    amplicon_total = pd.DataFrame(
+        pd.DataFrame(h5py.File(hdf5_path)['AMPLICON_COUNTS'], index=cell_barcodes).sum(axis=1),
+        columns=['amplicon_total'])
+
+    # ab panel
+    ab_names = [a.decode('utf8') for a in h5py.File(hdf5_path)['AB_DESCRIPTIONS']]
+    ab_raw = pd.DataFrame(h5py.File(hdf5_path)['ABS/raw'], index=cell_barcodes, columns=ab_names)
+    try:
+        ab_umi = pd.DataFrame(h5py.File(hdf5_path)['ABS/adjacency'], index=cell_barcodes, columns=ab_names)
+    except KeyError:
+        ab_umi = pd.DataFrame(h5py.File(hdf5_path)['ABS/unique'], index=cell_barcodes, columns=ab_names)
+
+    # get IgG1 counts, if available
+    if 'IgG1' not in ab_names and 'IgG1' in covariables:
+        print('IgG1 not in experiment and cannot be used as a covariable!')
+        covariables.remove('IgG1')
+
+    if 'IgG1' in ab_names:
+        igg1_umi = ab_umi.loc[:, 'IgG1']
+        igg1_umi.columns = 'IgG1'
+        ab_names.remove('IgG1')
+
+    else:
+        igg1_umi = pd.DataFrame(np.zeros((len(cell_barcodes), 1)), index=cell_barcodes, columns=['IgG1'])
+
+    ab_total_raw = pd.DataFrame(ab_raw.loc[:, ab_names].sum(axis=1), columns=['ab_total_raw'])
+    ab_total_umi = pd.DataFrame(ab_umi.loc[:, ab_names].sum(axis=1), columns=['ab_total_umi'])
+
+    # concatenate matrix for glm
+    glm_mat = pd.concat([igg1_umi, amplicon_total, ab_total_umi, ab_total_raw], axis=1).loc[:, covariables]
+
+    if antibodies == []:
+        antibodies = ab_umi.columns
+
+    # add pseudo count, log transform, normalize and column center the covariable matrix before SVD
+    covar = np.log(np.array(glm_mat) + 1)
+    covar = covar / covar.max(axis=0)
+    U, s, Vt = np.linalg.svd(covar - covar.mean(axis=0), full_matrices=False)
+
+    # use left eigenvectors for regression, correlation is scale invariant
+    if offset:
+        factors = sm.add_constant(U[:, :components], prepend=True)
+    else:
+        factors = U[:, :components]
+
+    # if some abs have all zero counts or were not measured, the regression cannot be performed on the raw matrix
+    # skip columns with all zero in regression
+    ab_filter = (ab_umi.loc[:, antibodies].sum(axis=0)) != 0
+
+    # apply glm
+    fit_val = np.zeros([len(U), len(antibodies)])
+    residuals = np.zeros([len(U), len(antibodies)])
+    params = np.zeros([len(antibodies), factors.shape[1]])
+    for i in range(len(antibodies)):
+        if ab_filter[i]:
+            linear_model_result = sm.GLM(np.log(np.array(ab_umi.loc[:, antibodies[i]]) + 1), factors,
+                                         family=sm.families.Gaussian()).fit()
+            fit_val[:, i] = linear_model_result.fittedvalues
+            residuals[:, i] = linear_model_result.resid_response
+            params[i] = linear_model_result.params
+
+    # save to HDF5 file
+    try:
+        with h5py.File(hdf5_path, 'a') as f:
+            f.create_dataset('ABS/corrected', data=residuals, dtype='float64', compression='gzip')
+    except RuntimeError:
+        with h5py.File(hdf5_path, 'a') as f:
+            del f['ABS/corrected']
+            f.create_dataset('ABS/corrected', data=residuals, dtype='float64', compression='gzip')
 
 def file_summary(tubes, cfg_file, summary_file, header_file=False):
     # displays sample files and class variables
