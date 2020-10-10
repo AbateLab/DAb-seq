@@ -97,7 +97,7 @@ RUN pip install h5py
 RUN pip install future
 RUN pip install matplotlib
 RUN pip install slackclient
-RUN pip3 install seaborn
+RUN pip install seaborn
 
 # set input directories to fully open - so any user can write
 RUN mkdir /input
@@ -162,8 +162,7 @@ RUN tar -xf hg19_bt2.tar
 RUN rm hg19_bt2.tar
 RUN mv hg19_bt2/*.bt2 .
 
-RUN pip install statsmodels
-RUN pip install seaborn
+#RUN pip install statsmodels
 
 ########################################################################################################################
 ########################################################################################################################
