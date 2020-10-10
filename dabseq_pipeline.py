@@ -20,6 +20,7 @@ from multiprocessing import Process
 # import functions from external files
 import resources
 import cell_calling
+# import hash_demux
 
 def slack_message(message, enabled=False, slack_token=None):
     # for posting a notification to a slack channel
@@ -97,6 +98,9 @@ if __name__ == "__main__":
                         help='ab barcode CSV file (required when processing ab reads)')
     parser.add_argument('--ab-method', type=str, default='all', choices=['unique', 'all'],
                         help='ab clustering method ("unique" or "all") (default: "all")')
+    parser.add_argument('--hash-csv', type=str, default=None,
+                        help='csv file containing hashing barcodes - if provided, cells will be demultiplexed based on'
+                             ' hash')
     parser.add_argument('--skip-flt3', action='store_true', default=False,
                         help='option to skip FLT3-ITD calling')
     parser.add_argument('--non-human', action='store_true', default=False,
@@ -121,6 +125,7 @@ if __name__ == "__main__":
     dna_panel = args.dna_panel
     ab_only = args.ab_only
     ab_barcode_csv = args.ab_csv
+    hash_csv = args.hash_csv
     skip_flt3 = args.skip_flt3
     non_human = args.non_human
     ignore_panel_uniformity = args.ignore_panel_uniformity
@@ -155,6 +160,15 @@ if __name__ == "__main__":
     if not dna_only and pipeline_mode != 'genotype':
         if ab_barcode_csv is None:
             print('An antibody CSV barcode file is required when processing Ab reads.')
+            raise SystemExit
+        elif not os.path.isfile(ab_barcode_csv):
+            print('Antibody CSV barcode file not found! Please check the file name and path.')
+            raise SystemExit
+
+    # check for ab hashing csv (if specified)
+    if hash_csv is not None:
+        if not os.path.isfile(hash_csv):
+            print('Hashing CSV file not found! Please check the file name and path.')
             raise SystemExit
 
     # cannot perform genotyping in ab_only mode
@@ -209,7 +223,6 @@ if __name__ == "__main__":
                             break
             else:
                 # save a configuration parameter to a variable
-
                 cfg_variable = line.split('=')[0]
 
                 if 'panel_fastq' in cfg_variable and pipeline_mode == 'genotype':
@@ -553,10 +566,16 @@ if __name__ == "__main__":
 
             if not dna_only:
                 # create table of per-cell ab counts for valid cells only
+                # also calculate clr for valid cells
                 resources.umi_counts_by_cell(umi_counts_merged,
                                              ab_barcode_csv,
                                              ab_dir,
                                              cells)
+
+                # if cell hashing csv is specified, demultiplex cells
+                if hash_csv is not None:
+                    hash_demux.demux_cells(ab_dir,
+                                           ab_barcode_csv)
 
             print('''
 ###################################################################################
@@ -913,9 +932,12 @@ if __name__ == "__main__":
         resources.add_amplicon_counts(geno_hdf5, sample_names, amplicon_counts_tsvs)
 
         # if abs in experiment, add counts to hdf5 file
+        # also perform antibody correction using GLM
+        # note: clr is calculated independently for each cell, whereas the corrected counts regress across all cells
         if not dna_only:
             ab_count_dirs = [cohort_dir + s + '/abs/by_method.CELLS/' for s in sample_names]
             resources.add_hdf5_ab_counts(geno_hdf5, sample_names, ab_count_dirs)
+            resources.GLM_regression(geno_hdf5, ['IgG1', 'amplicon_total', 'ab_total_raw', 'ab_total_umi'])
 
         # compress the final annotated vcf to reduce size
         if non_human:
