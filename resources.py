@@ -24,8 +24,8 @@ import copy
 import allel
 import pandas as pd
 import h5py
-import statsmodels.api as sm
-from scipy.stats.mstats import gmean
+# import statsmodels.api as sm
+# from scipy.stats.mstats import gmean
 
 # add the modified umi_tools directory to python path
 sys.path.append(os.path.join(sys.path[0], 'umi_tools'))
