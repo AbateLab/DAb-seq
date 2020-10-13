@@ -20,7 +20,7 @@ from multiprocessing import Process
 # import functions from external files
 import resources
 import cell_calling
-# import hash_demux
+import hash_demux
 
 def slack_message(message, enabled=False, slack_token=None):
     # for posting a notification to a slack channel
@@ -99,8 +99,13 @@ if __name__ == "__main__":
     parser.add_argument('--ab-method', type=str, default='all', choices=['unique', 'all'],
                         help='ab clustering method ("unique" or "all") (default: "all")')
     parser.add_argument('--hash-csv', type=str, default=None,
-                        help='csv file containing hashing barcodes - if provided, cells will be demultiplexed based on'
-                             ' hash')
+                        help='csv file containing hashing barcodes - if provided, cells will be demultiplexed based on hash')
+    parser.add_argument('--r1-dna-min-len', type=int, default=50,
+                        help='minimum dna panel read 1 length after barcode and adapter trimming. may need to be'
+                             ' modified for shorter sequencing runs (default: 50 bp; >30 bp is recommended')
+    parser.add_argument('--r2-dna-min-len', type=int, default=50,
+                        help='minimum dna panel read 2 length after adapter trimming. may need to be modified for'
+                             ' shorter sequencing runs (default: 50 bp; >30 bp is recommended')
     parser.add_argument('--skip-flt3', action='store_true', default=False,
                         help='option to skip FLT3-ITD calling')
     parser.add_argument('--non-human', action='store_true', default=False,
@@ -126,6 +131,8 @@ if __name__ == "__main__":
     ab_only = args.ab_only
     ab_barcode_csv = args.ab_csv
     hash_csv = args.hash_csv
+    r1_min_len_panel = args.r1_dna_min_len
+    r2_min_len_panel = args.r2_dna_min_len
     skip_flt3 = args.skip_flt3
     non_human = args.non_human
     ignore_panel_uniformity = args.ignore_panel_uniformity
@@ -352,9 +359,8 @@ if __name__ == "__main__":
 
             bar_ind_1, bar_ind_2 = range(9), range(-9, 0)
 
-        # set minimum sequence lengths after trimming (can be modified depending on read length)
-        r1_min_len_panel = 30
-        r2_min_len_panel = 30
+        # set minimum ab sequence lengths after trimming
+        # should be acceptable for most tags
         r1_min_len_ab = 0
         r2_min_len_ab = 20
 
