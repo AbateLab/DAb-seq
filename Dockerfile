@@ -88,16 +88,17 @@ RUN rm -rf samtools-1.8/
 
 ### install missing python modules
 RUN pip3 install cutadapt
-RUN pip install numpy
-RUN pip install pandas
-RUN pip install regex
-RUN pip install scipy
-RUN pip install scikit-allel
-RUN pip install h5py
-RUN pip install future
-RUN pip install matplotlib
-RUN pip install slackclient
-RUN pip install seaborn
+RUN pip3 install numpy
+RUN pip3 install pandas
+RUN pip3 install regex
+RUN pip3 install scipy
+RUN pip3 install h5py
+RUN pip3 install future
+RUN pip3 install matplotlib
+RUN pip3 install slackclient
+RUN pip3 install seaborn
+RUN pip3 install statsmodels
+RUN pip3 install scikit-allel
 
 # set input directories to fully open - so any user can write
 RUN mkdir /input
@@ -113,7 +114,7 @@ RUN touch /root/.ssh/known_hosts
 RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
 WORKDIR /dabseq/pipeline
 RUN git clone git@github.com:AbateLab/DAb-seq
-ENTRYPOINT ["python", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
+ENTRYPOINT ["python3", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
 
 FROM base-build AS human-build
 
@@ -161,8 +162,6 @@ RUN gunzip hg19_bt2.tar.gz
 RUN tar -xf hg19_bt2.tar
 RUN rm hg19_bt2.tar
 RUN mv hg19_bt2/*.bt2 .
-
-RUN pip install statsmodels
 
 ########################################################################################################################
 ########################################################################################################################

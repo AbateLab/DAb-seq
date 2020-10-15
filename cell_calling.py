@@ -6,7 +6,6 @@ written by ben 11.25.2018
 """
 
 # modules
-from __future__ import division
 import numpy as np
 import pandas as pd
 

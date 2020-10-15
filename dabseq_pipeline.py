@@ -522,7 +522,7 @@ if __name__ == "__main__":
             # remove old umi count files
             umi_file_cleanup = [os.remove(t.umi_counts) for t in tubes]
 
-            # create table of per-cell ab counts for all barcodes
+            # create table of ab counts for all barcodes
             resources.umi_counts_by_cell(umi_counts_merged,
                                          ab_barcode_csv,
                                          ab_dir,
@@ -573,15 +573,18 @@ if __name__ == "__main__":
             if not dna_only:
                 # create table of per-cell ab counts for valid cells only
                 # also calculate clr for valid cells
-                resources.umi_counts_by_cell(umi_counts_merged,
-                                             ab_barcode_csv,
-                                             ab_dir,
-                                             cells)
+                ab_clr_counts_file = resources.umi_counts_by_cell(umi_counts_merged,
+                                                                  ab_barcode_csv,
+                                                                  ab_dir,
+                                                                  cells)
 
                 # if cell hashing csv is specified, demultiplex cells
                 if hash_csv is not None:
-                    hash_demux.demux_cells(ab_dir,
-                                           ab_barcode_csv)
+                    hash_demux.demux_cells(ab_clr_counts_file,
+                                           hash_csv,
+                                           ab_dir + 'hashes/')
+
+
 
             print('''
 ###################################################################################

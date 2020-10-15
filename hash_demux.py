@@ -6,9 +6,10 @@ written by ben 10.8.2020
 """
 
 # modules
-from __future__ import division
 import numpy as np
 import pandas as pd
+import os
+import shutil
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 from scipy.signal import find_peaks
@@ -24,8 +25,18 @@ plt.rcParams['axes.unicode_minus'] = False
 # load external files
 import resources
 
-def demux_cells(ab_clr_count_file, hash_csv, output_folder):
+def demux_cells(ab_clr_count_file, hash_csv, hashing_folder):
     # associate cells with a sample based on their hash
+
+    # create hashing output folder if it doesn't exist
+    if not os.path.exists(hashing_folder):
+        os.mkdir(hashing_folder)
+    else:
+        shutil.rmtree(hashing_folder)
+        os.mkdir(hashing_folder)
+
+    # extract sample name
+    sample_name = os.path.basename(ab_clr_count_file).split('.clr.cells.tsv')[0]
 
     # load antibody hash descriptions
     hashes = resources.load_barcodes(hash_csv, 1, False)
@@ -34,7 +45,8 @@ def demux_cells(ab_clr_count_file, hash_csv, output_folder):
     # load clr counts of each ab
     ab_counts_clr = pd.read_csv(ab_clr_count_file, sep='\t', header=0, index_col=0)
 
-    # determine thresholds for each hash
+    # determine thresholds for each hash and plot fitted distributions
+    plt.figure(figsize=(7, 5))
     thresholds = []
     for h in hash_names:
 
@@ -80,6 +92,8 @@ def demux_cells(ab_clr_count_file, hash_csv, output_folder):
         plt.axvline(x=thresh, linestyle=':', lw=2, c=color)
         print(h + ': ' + str(thresh))
 
+    plt.savefig(hashing_folder + sample_name + '.curve_fit.png', dpi=300)
+
     # plot all pairs of hashes as scatter plots
     hash_combos = [list(x) for x in itertools.combinations(hash_names, 2)]
     for h in hash_combos:
@@ -87,32 +101,7 @@ def demux_cells(ab_clr_count_file, hash_csv, output_folder):
         sns.scatterplot(x=ab_counts_clr[h[0]], y=ab_counts_clr[h[1]], s=3)
         plt.axvline(x=thresholds[hash_names.index(h[0])])
         plt.plot(np.linspace(-5, 5, 100), [thresholds[hash_names.index(h[1])]] * 100)
+        plt.savefig
 
     # assign cells to samples based on thresholds
 
-
-
-def amplicon_boxplot(cell_df, output_file):
-    # generate amplicon box plot showing number of reads per amplicon per cell
-
-    # plot reads per cell for each amplicon in called cells
-    plt.figure(figsize=(15, 7))
-
-    df = cell_df.reindex(cell_df.median().sort_values(ascending=False).index, axis=1)  # sort columns by median value
-    amplicons = list(df.columns)  # amplicon names
-
-    plt.boxplot(np.transpose(df), 0, '', boxprops=dict(facecolor='gainsboro', color='k'), patch_artist=True)
-
-    plt.xticks(np.arange(1, len(amplicons) + 1.2), amplicons, rotation='vertical', fontsize=8)
-    plt.yticks(fontsize=12)
-    plt.xlim([0, len(amplicons) + 1])
-    plt.ylabel('Number of Reads per Cell (N = %d)' % len(cell_df.index), fontsize=14, labelpad=20)
-    plt.xlabel('Amplicon', fontsize=14, labelpad=20)
-
-    plt.plot(np.linspace(0, 10000, 10),
-             [0] * np.linspace(0, 10000, 10),
-             'k--',
-             linewidth=1)
-
-    plt.tight_layout()
-    plt.savefig(output_file, dpi=300)

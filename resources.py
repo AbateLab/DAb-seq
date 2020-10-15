@@ -15,7 +15,7 @@ import os
 import os.path
 import shutil
 import csv
-from itertools import product, combinations, izip
+from itertools import product, combinations
 from collections import Counter
 import numpy as np
 import subprocess
@@ -24,11 +24,11 @@ import copy
 import allel
 import pandas as pd
 import h5py
-# import statsmodels.api as sm
-# from scipy.stats.mstats import gmean
+import statsmodels.api as sm
+from scipy.stats.mstats import gmean
 
 # add the modified umi_tools directory to python path
-sys.path.append(os.path.join(sys.path[0], 'umi_tools'))
+sys.path.append(os.path.join(sys.path[0], 'umi-tools-1.0.0'))
 import Utilities as U
 import network as network
 
@@ -124,7 +124,7 @@ class TapestriTube(object):
         too_short = 0
 
         # iterate through info file (barcodes) and trim file (reads)
-        for bar_line, trim_line in izip(bar_file.stdout, trim_file.stdout):
+        for bar_line, trim_line in zip(bar_file.stdout, trim_file.stdout):
 
             assert bar_line.strip() == trim_line.strip(), 'Cluster IDs do not match!'
 
@@ -282,6 +282,7 @@ class TapestriTube(object):
         # print number of valid/invalid ab reads
         print('Tube ' + str(self.tube_num) + ': ' + str(valid_ab_reads) + ' VALID ab reads')
         print('Tube ' + str(self.tube_num) + ': ' + str(invalid_ab_reads) + ' INVALID ab reads')
+        # TODO save ab metrics to file
 
     def count_umis(self, clustering_method):
         # count umis using selected clustering methods
@@ -543,7 +544,7 @@ def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=Non
     if cells is not None:
         clr_count_file = ab_dir_by_method + os.path.basename(umi_counts_merged)[:-3] + 'clr.cells.tsv'
     else:
-        return
+        return None
 
     # for clr, use 'adjacency' counts
     # if not available, use 'unique'
@@ -571,6 +572,8 @@ def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=Non
 
     # save clr counts to file
     ab_counts_clr.to_csv(path_or_buf=clr_count_file, sep='\t')
+
+    return clr_count_file
 
 def load_barcodes(barcode_file, max_dist, check_barcodes):
     # loads barcodes from csv and checks all pairwise distances to ensure error correction will work
