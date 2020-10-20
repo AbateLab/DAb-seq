@@ -149,7 +149,6 @@ RUN bgzip -f -@ 16 clinvar_20200329.chr.vcf
 RUN tabix clinvar_20200329.chr.vcf.gz
 
 # get hg19 fasta and pre-built indices
-# need to download pre-built files to avoid out-of-memory error on Docker Hub
 RUN wget -q --show-progress --progress=bar:force:noscroll ftp://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips/hg19.fa.gz -O hg19.fasta.gz
 RUN gunzip hg19.fasta.gz
 # genrate using 'gatk CreateSequenceDictionary'
@@ -199,7 +198,6 @@ RUN bgzip -f -@ 16 clinvar_20200329.chr.vcf
 RUN tabix clinvar_20200329.chr.vcf.gz
 
 # get hg19/hxb2 fasta and pre-built indices
-# need to download pre-built files to avoid out-of-memory error on Docker Hub
 RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/hby5s2elzu4do60/hg19_hxb2.fasta.gz?dl=0 -O hg19_hxb2.fasta.gz
 RUN gunzip hg19_hxb2.fasta.gz
 RUN wget -q --show-progress --progress=bar:force:noscroll https://www.dropbox.com/s/3o2vrm8hqr67pbu/hg19_hxb2.dict?dl=0 -O hg19_hxb2.dict
@@ -209,7 +207,6 @@ RUN gunzip hg19_hxb2_bt2.tar.gz
 RUN tar -xf hg19_hxb2_bt2.tar
 RUN rm hg19_hxb2_bt2.tar
 RUN mv hg19_hxb2_bt2/*.bt2 .
-RUN ls
 
 ########################################################################################################################
 ########################################################################################################################
