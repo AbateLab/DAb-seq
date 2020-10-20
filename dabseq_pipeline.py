@@ -26,19 +26,20 @@ def slack_message(message, enabled=False, slack_token=None):
     # for posting a notification to a slack channel
 
     if enabled:
-
-        channel = 'server-alerts'
-        sc = SlackClient(slack_token)
+        client = WebClient(token=slack_token)
 
         try:
-            sc.api_call('chat.postMessage',
-                        channel=channel,
-                        text=message,
-                        username='pipelines',
-                        icon_emoji=':adam:')
+            response = client.chat_postMessage(
+                channel='#server-alerts',
+                text=message,
+                username='pipelines',
+                icon_emoji=':adam:')
 
-        except:
-            print('Slack error. Continuing...')
+        except SlackApiError as e:
+            # You will get a SlackApiError if "ok" is False
+            assert e.response["ok"] is False
+            assert e.response["error"]  # str like 'invalid_auth', 'channel_not_found'
+            print(f"Got an error: {e.response['error']}")
 
     else:
         pass
@@ -198,34 +199,34 @@ if __name__ == "__main__":
             elif line[0] == '[':
 
                 if '[Barcoding]' in line and pipeline_mode == 'genotype':
-                    line = cfg.next()
+                    line = next(cfg)
                     while line[0] != '[':
                         try:
-                            line = cfg.next()
+                            line = next(cfg)
                         except StopIteration:
                             break
 
                 if '[DNA]' in line and ab_only:
-                    line = cfg.next()
+                    line = next(cfg)
                     while line[0] != '[':
                         try:
-                            line = cfg.next()
+                            line = next(cfg)
                         except StopIteration:
                             break
 
                 if '[Antibodies]' in line and (dna_only or pipeline_mode == 'genotype'):
-                    line = cfg.next()
+                    line = next(cfg)
                     while line[0] != '[':
                         try:
-                            line = cfg.next()
+                            line = next(cfg)
                         except StopIteration:
                             break
 
                 if '[Genotyping]' in line and (ab_only or pipeline_mode == 'barcode'):
-                    line = cfg.next()
+                    line = next(cfg)
                     while line[0] != '[':
                         try:
-                            line = cfg.next()
+                            line = next(cfg)
                         except StopIteration:
                             break
             else:
@@ -290,7 +291,8 @@ if __name__ == "__main__":
     else:
         slack_enabled = False
     if slack_enabled:
-        from slackclient import SlackClient
+        from slack import WebClient
+        from slack.errors import SlackApiError
 
 ########################################################################################################################
 #                                                   BARCODING
@@ -348,7 +350,7 @@ if __name__ == "__main__":
             r1_end = 'CTGTCTCTTATACACATCT'
             r2_end = 'CGTCATCG'
 
-            bar_ind_1, bar_ind_2 = range(8), range(-8, 0)
+            bar_ind_1, bar_ind_2 = list(range(8)), list(range(-8, 0))
 
         elif chem == 'V2':
             cell_barcode_csv_file = sys.path[0] + '/barcodes/mb_cell_barcodes_v2.csv'
@@ -357,7 +359,7 @@ if __name__ == "__main__":
             r1_end = 'CTGTCTCTTATACACATCT'
             r2_end = 'GACTACTGCGAGTAC'
 
-            bar_ind_1, bar_ind_2 = range(9), range(-9, 0)
+            bar_ind_1, bar_ind_2 = list(range(9)), list(range(-9, 0))
 
         # set minimum ab sequence lengths after trimming
         # should be acceptable for most tags
@@ -367,7 +369,9 @@ if __name__ == "__main__":
         # send slack notification
         start_time = time.time()
         start_time_fmt = str(time.strftime('%m-%d-%Y %H:%M:%S', time.localtime(start_time)))
-        slack_message('Barcoding pipeline started for sample %s at %s.' % (sample_name, start_time_fmt),
+        slack_message('Barcoding pipeline started for cohort %s, sample %s at %s.' % (cohort_name,
+                                                                                      sample_name,
+                                                                                      start_time_fmt),
                       slack_enabled,
                       slack_token)
 
@@ -692,8 +696,9 @@ if __name__ == "__main__":
         # send slack notification
         elapsed_time = time.time() - start_time
         elapsed_time_fmt = str(time.strftime('%Hh %Mm %Ss', time.gmtime(elapsed_time)))
-        slack_message('Barcoding complete for sample %s! Total elapsed time is %s.' % (sample_name,
-                                                                                       elapsed_time_fmt),
+        slack_message('Barcoding complete for cohort %s, sample %s! Total elapsed time is %s.' % (cohort_name,
+                                                                                                  sample_name,
+                                                                                                  elapsed_time_fmt),
                       slack_enabled,
                       slack_token)
 
@@ -750,7 +755,7 @@ if __name__ == "__main__":
 
             assert sorted(s_gvcf) == sorted(tsv_barcodes), 'GVCF and TSV barcodes do not match!'
 
-            gvcf_files.append([gvcf_folder + b + '.g.vcf' for b in s_gvcf])
+            gvcf_files.append([gvcf_folder + b.decode('utf-8') + '.g.vcf' for b in s_gvcf])
             num_cells.append(len(tsv_barcodes))
 
             if not skip_flt3:
@@ -761,7 +766,7 @@ if __name__ == "__main__":
 
                 assert sorted(s_itd) == sorted(tsv_barcodes), 'FLT3 and TSV barcodes do not match!'
 
-                itd_files.append([itd_folder + b + '.flt3itd.vcf' for b in s_itd])
+                itd_files.append([itd_folder + b.decode('utf-8') + '.flt3itd.vcf' for b in s_itd])
 
         # # base path for genomics db
         db_dir = cohort_genotyping_dir + 'dbs/'

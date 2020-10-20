@@ -6,9 +6,10 @@ FROM ubuntu:18.04 AS base-build
 
 ### install linux dependencies
 RUN apt-get -y update
-RUN apt-get install -y wget
-RUN apt-get -y install python-pip
+RUN apt-get -y install python3
 RUN apt-get -y install python3-pip
+RUN ln -s /usr/bin/python3 /usr/bin/python & ln -s /usr/bin/pip3 /usr/bin/pip
+RUN apt-get install -y wget
 RUN apt-get install -y pigz
 RUN apt-get install -y libncurses5-dev
 RUN apt-get install -y zlib1g-dev
@@ -87,18 +88,17 @@ RUN rm -rf htslib-1.9/
 RUN rm -rf samtools-1.8/
 
 ### install missing python modules
-RUN pip3 install cutadapt
-RUN pip3 install numpy
-RUN pip3 install pandas
-RUN pip3 install regex
-RUN pip3 install scipy
-RUN pip3 install h5py
-RUN pip3 install future
-RUN pip3 install matplotlib
-RUN pip3 install slackclient
-RUN pip3 install seaborn
-RUN pip3 install statsmodels
-RUN pip3 install scikit-allel
+RUN pip3 install numpy==1.19.2
+RUN pip3 install scipy==1.5.2
+RUN pip3 install pandas==1.1.3
+RUN pip3 install regex==2020.10.15
+RUN pip3 install h5py==2.10.0
+RUN pip3 install matplotlib==3.3.2
+RUN pip3 install seaborn==0.11.0
+RUN pip3 install statsmodels==0.12.0
+RUN pip3 install scikit-allel==1.3.2
+RUN pip3 install cutadapt==2.10
+RUN pip3 install slackclient==2.9.2
 
 # set input directories to fully open - so any user can write
 RUN mkdir /input
@@ -209,6 +209,7 @@ RUN gunzip hg19_hxb2_bt2.tar.gz
 RUN tar -xf hg19_hxb2_bt2.tar
 RUN rm hg19_hxb2_bt2.tar
 RUN mv hg19_hxb2_bt2/*.bt2 .
+RUN ls
 
 ########################################################################################################################
 ########################################################################################################################

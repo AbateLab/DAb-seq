@@ -27,8 +27,8 @@ import h5py
 import statsmodels.api as sm
 from scipy.stats.mstats import gmean
 
-# add the modified umi_tools directory to python path
-sys.path.append(os.path.join(sys.path[0], 'umi-tools-1.0.0'))
+# add the modified umi_tools directory to path
+sys.path.append(os.path.join(sys.path[0], 'umi_tools'))
 import Utilities as U
 import network as network
 
@@ -110,13 +110,13 @@ class TapestriTube(object):
         bar_cmd = 'cutadapt -a %s -O 8 -e 0.2 %s -j 8 --quiet' % (r1_start,
                                                                   r1_in)
 
-        bar_file = subprocess.Popen(bar_cmd, stdout=subprocess.PIPE, shell=True)
+        bar_file = subprocess.Popen(bar_cmd, stdout=subprocess.PIPE, shell=True, universal_newlines=True, bufsize=1)
 
         # hard trimming (55 bp off R1, 5 bp off R2 for panel) is used to ensure entire cell barcode region is removed
         # barcode bases for V1 chemistry: 47 bp
         # max barcode bases for V2 chemistry: 50 bp
 
-        trim_file = subprocess.Popen(trim_cmd, stdout=subprocess.PIPE, shell=True)
+        trim_file = subprocess.Popen(trim_cmd, stdout=subprocess.PIPE, shell=True, universal_newlines=True, bufsize=1)
 
         total_reads = 0     # total count of all reads
         invalid_reads = 0   # no valid barcode found
@@ -131,7 +131,7 @@ class TapestriTube(object):
             total_reads += 1
 
             # extract trimmed barcode region
-            bar_seq = bar_file.stdout.next().strip()
+            bar_seq = bar_file.stdout.readline().strip()
 
             # if trimmed adapter is too long - no barcode present
             if len(bar_seq) > 52:
@@ -140,9 +140,9 @@ class TapestriTube(object):
 
                 # advance through files
                 for i in range(7):
-                    trim_file.stdout.next()
+                    next(trim_file.stdout)
                 for i in range(2):
-                    bar_file.stdout.next()
+                    next(bar_file.stdout)
 
                 continue
 
@@ -158,9 +158,9 @@ class TapestriTube(object):
 
                     # advance through files
                     for i in range(7):
-                        trim_file.stdout.next()
+                        next(trim_file.stdout)
                     for i in range(2):
-                        bar_file.stdout.next()
+                        next(bar_file.stdout)
 
                     continue
 
@@ -169,26 +169,26 @@ class TapestriTube(object):
 
                     # adavance through barcode file
                     for i in range(2):
-                        bar_file.stdout.next()
+                        next(bar_file.stdout)
 
                     barcode = check[0] + check[1] + '-' + str(self.tube_num)
 
                     # R1 from trimmed file
                     header_1 = trim_line.strip()
                     id_1 = header_1.split(' ')[0][1:]
-                    seq_1 = trim_file.stdout.next().strip()
-                    trim_file.stdout.next()
-                    qual_1 = trim_file.stdout.next().strip()
+                    seq_1 = next(trim_file.stdout).strip()
+                    next(trim_file.stdout)
+                    qual_1 = next(trim_file.stdout).strip()
 
                     # R2 from trimmed file
-                    header_2 = trim_file.stdout.next().strip()
+                    header_2 = next(trim_file.stdout).strip()
                     id_2 = header_2.split(' ')[0][1:]
 
                     assert id_1 == id_2, 'Cluster IDs in interleaved input do not match!'
 
-                    seq_2 = trim_file.stdout.next().strip()
-                    trim_file.stdout.next()
-                    qual_2 = trim_file.stdout.next().strip()
+                    seq_2 = next(trim_file.stdout).strip()
+                    next(trim_file.stdout)
+                    qual_2 = next(trim_file.stdout).strip()
 
                     # check reads for length
                     if len(seq_1) < r1_min_len or len(seq_2) < r2_min_len:
@@ -225,7 +225,7 @@ class TapestriTube(object):
                                                                                          len(ab_handles),
                                                                                          self.ab_r2_temp)
 
-        ab_process = subprocess.Popen(ab_cmd, stdout=subprocess.PIPE, shell=True)
+        ab_process = subprocess.Popen(ab_cmd, stdout=subprocess.PIPE, shell=True, universal_newlines=True, bufsize=1)
 
         # count valid ab reads
         valid_ab_reads = 0
@@ -237,9 +237,9 @@ class TapestriTube(object):
             cell_barcode = line.strip().split('_')[1]  # extract corrected barcode from header
 
             # extract sequences
-            seq = ab_process.stdout.next().strip()
-            ab_process.stdout.next()
-            qual = ab_process.stdout.next().strip()
+            seq = next(ab_process.stdout).strip()
+            next(ab_process.stdout)
+            qual = next(ab_process.stdout).strip()
 
             # try ab matching to custom or totalseq tags using read length
             valid_length = False
@@ -336,14 +336,16 @@ class TapestriTube(object):
     def umi_tools_cluster(group_umis, clustering_method):
         # cluster a umi group with umi-tools
 
+        # encode umis as bytes and create count dictionary
+        group_umis = [u.encode() for u in group_umis]
         umi_counter = Counter(group_umis)
 
         # set up UMIClusterer functor with parameters specific to specified method
         # choose method = 'all' for all available methods
 
         processor = network.UMIClusterer()  # initialize UMIclusterer
-        clusters = processor(umi_counter.keys(),
-                             umi_counter,
+
+        clusters = processor(umi_counter,
                              threshold=1,
                              cluster_method=clustering_method)
         counts = {k: str(len(v)) for k, v in clusters.items()}
@@ -448,7 +450,8 @@ def count_alignments(r1_files, amplicon_file, fasta_file, tsv, aln_stats_file, t
 
     # extract names of reference sequences
     refs = []
-    get_refs = subprocess.Popen('bowtie2-inspect -n %s' % insert_bt2, stdout=subprocess.PIPE, shell=True)
+    get_refs = subprocess.Popen('bowtie2-inspect -n %s' % insert_bt2, stdout=subprocess.PIPE, shell=True,
+                                universal_newlines=True, bufsize=1)
     for line in get_refs.stdout:
         refs.append(line.strip())
     refs.sort()
@@ -463,7 +466,7 @@ def count_alignments(r1_files, amplicon_file, fasta_file, tsv, aln_stats_file, t
     bt2_cmd = 'bowtie2 -p 24 -x %s -U %s 2> %s | samtools view -q 3 -F 4 -F 0X0100' % (insert_bt2,
                                                                                        ' -U '.join(r1_files),
                                                                                        aln_stats_file)
-    bt2_align = subprocess.Popen(bt2_cmd, stdout=subprocess.PIPE, shell=True)
+    bt2_align = subprocess.Popen(bt2_cmd, stdout=subprocess.PIPE, shell=True, universal_newlines=True, bufsize=1)
 
     # iterate through all reads
     for line in bt2_align.stdout:
@@ -580,7 +583,7 @@ def load_barcodes(barcode_file, max_dist, check_barcodes):
     # returns a dictionary of barcodes with their descriptions
 
     # load barcodes from csv
-    reader = csv.reader(open(barcode_file, 'r'))
+    reader = csv.reader(open(barcode_file, 'r', encoding='utf-8'))
     barcodes = {}
     for barcode, desc in reader:
         barcodes[barcode] = desc
@@ -1014,20 +1017,20 @@ def GLM_regression(hdf5_path, covariables, antibodies=[], components=1, offset=F
     Covariables are SVD transformed and the first N components are retained (default 1).
     Currently uses linear regression on log transformed data and a Gaussian error model.'''
 
-    cell_barcodes = [c.decode('utf8') for c in h5py.File(hdf5_path)['CELL_BARCODES']]
+    cell_barcodes = [c.decode('utf8') for c in h5py.File(hdf5_path, 'r')['CELL_BARCODES']]
 
     # dna panel
     amplicon_total = pd.DataFrame(
-        pd.DataFrame(h5py.File(hdf5_path)['AMPLICON_COUNTS'], index=cell_barcodes).sum(axis=1),
+        pd.DataFrame(h5py.File(hdf5_path, 'r')['AMPLICON_COUNTS'], index=cell_barcodes).sum(axis=1),
         columns=['amplicon_total'])
 
     # ab panel
-    ab_names = [a.decode('utf8') for a in h5py.File(hdf5_path)['AB_DESCRIPTIONS']]
-    ab_raw = pd.DataFrame(h5py.File(hdf5_path)['ABS/raw'], index=cell_barcodes, columns=ab_names)
+    ab_names = [a.decode('utf8') for a in h5py.File(hdf5_path, 'r')['AB_DESCRIPTIONS']]
+    ab_raw = pd.DataFrame(h5py.File(hdf5_path, 'r')['ABS/raw'], index=cell_barcodes, columns=ab_names)
     try:
-        ab_umi = pd.DataFrame(h5py.File(hdf5_path)['ABS/adjacency'], index=cell_barcodes, columns=ab_names)
+        ab_umi = pd.DataFrame(h5py.File(hdf5_path, 'r')['ABS/adjacency'], index=cell_barcodes, columns=ab_names)
     except KeyError:
-        ab_umi = pd.DataFrame(h5py.File(hdf5_path)['ABS/unique'], index=cell_barcodes, columns=ab_names)
+        ab_umi = pd.DataFrame(h5py.File(hdf5_path, 'r')['ABS/unique'], index=cell_barcodes, columns=ab_names)
 
     # get IgG1 counts, if available
     if 'IgG1' not in ab_names and 'IgG1' in covariables:
@@ -1281,7 +1284,7 @@ def generate_sample(R1_files, R2_files, dna_only, ab_only, sample_name, temp_dir
     # for experiments with antibody and panel data
     else:
 
-        for i in range(0, len(R1_files) / 2):
+        for i in range(0, int(len(R1_files) / 2)):
             # assign filenames to sample types
             # note: using alphabetization pattern which may not exist in future
 
@@ -1289,8 +1292,8 @@ def generate_sample(R1_files, R2_files, dna_only, ab_only, sample_name, temp_dir
 
             # dna panel
 
-            panel_r1 = R1_files[i + len(R1_files) / 2]
-            panel_r2 = R2_files[i + len(R1_files) / 2]
+            panel_r1 = R1_files[i + int(len(R1_files) / 2)]
+            panel_r2 = R2_files[i + int(len(R1_files) / 2)]
 
             # set file locations
 
