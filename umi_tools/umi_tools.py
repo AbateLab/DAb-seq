@@ -3,9 +3,6 @@ umi_tools.py - Tools for UMI analyses
 ===============================================
 
 :Author: Tom Smith & Ian Sudbury, CGAT
-
-***Modified by Ben Demaree, UCSF***
-
 :Release: $Id$
 :Date: |today|
 :Tags: Genomics UMI
@@ -28,9 +25,11 @@ To use a specific tool, type::
     umi_tools <tool> [tool options] [tool arguments]
 '''
 
+from __future__ import absolute_import
 import os
 import sys
-import imp
+import importlib
+from umi_tools import __version__
 
 
 def main(argv=None):
@@ -39,24 +38,24 @@ def main(argv=None):
 
     path = os.path.abspath(os.path.dirname(__file__))
 
-    # if len(argv) == 1 or argv[1] == "--help" or argv[1] == "-h":
-    #     print(globals()["__doc__"])
-    #
-    #     return
-    #
-    # elif len(argv) == 1 or argv[1] == "--version" or argv[1] == "-v":
-    #     # collect umi_tools version
-    #     sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-    #     import version
-    #
-    #     print("UMI-tools version: %s" % version.__version__)
-    #
-    #     return
+    if len(argv) == 1 or argv[1] == "--help" or argv[1] == "-h":
+        print("For full UMI-tools documentation, see: "
+              "https://umi-tools.readthedocs.io/en/latest/\n")
+        print(globals()["__doc__"])
+
+        return
+
+    elif len(argv) == 1 or argv[1] == "--version" or argv[1] == "-v":
+        print("UMI-tools version: %s" % __version__)
+
+        return
+
+    elif argv[2] in ["--help", "-h", "--help-extended"]:
+        print("UMI-Tools: Version %s" % __version__)
 
     command = argv[1]
 
-    (file, pathname, description) = imp.find_module(command, [path, ])
-    module = imp.load_module(command, file, pathname, description)
+    module = importlib.import_module("umi_tools." + command, "umi_tools")
     # remove 'umi-tools' from sys.argv
     del sys.argv[0]
     module.main(sys.argv)

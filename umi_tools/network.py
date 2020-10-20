@@ -2,11 +2,6 @@
 network.py - Network methods for dealing with UMIs
 =========================================================
 
-:Author: Tom Smith
-:Release: $Id$
-:Date: |today|
-:Tags: Python UMI
-
 '''
 
 from __future__ import absolute_import
@@ -16,8 +11,8 @@ import sys
 import regex
 import numpy as np
 
-from _dedup_umi import edit_distance
-import Utilities as U
+from umi_tools._dedup_umi import edit_distance
+import umi_tools.Utilities as U
 
 sys.setrecursionlimit(10000)
 
@@ -106,12 +101,12 @@ def iter_nearest_neighbours(umis, substr_idx):
     use substring dict to get (approximately) all the nearest neighbours to
     each in a set of umis.
     '''
-    for u in umis:
+    for i, u in enumerate(umis, 1):
         neighbours = set()
         for idx, substr_map in substr_idx.items():
             u_sub = u[slice(*idx)]
             neighbours = neighbours.union(substr_map[u_sub])
-        neighbours.remove(u)
+        neighbours.difference_update(umis[:i])
         for nbr in neighbours:
             yield u, nbr
 
@@ -319,52 +314,53 @@ class UMIClusterer:
         return groups
 
     def __init__(self):
-        ''' initialize '''
+        ''' select the required class methods for the cluster_method'''
         pass
-    #
-    #     self.max_umis_per_position = 0
-    #     self.total_umis_per_position = 0
-    #     self.positions = 0
-    #
-    #     if cluster_method == "adjacency":
-    #         self.get_adj_list = self._get_adj_list_adjacency
-    #         self.get_connected_components = self._get_connected_components_adjacency
-    #         self.get_groups = self._group_adjacency
-    #
-    #     elif cluster_method == "directional":
-    #         self.get_adj_list = self._get_adj_list_directional
-    #         self.get_connected_components = self._get_connected_components_adjacency
-    #         self.get_groups = self._group_directional
-    #
-    #     elif cluster_method == "cluster":
-    #         self.get_adj_list = self._get_adj_list_adjacency
-    #         self.get_connected_components = self._get_connected_components_adjacency
-    #         self.get_groups = self._group_cluster
-    #
-    #     elif cluster_method == "percentile":
-    #         self.get_adj_list = self._get_adj_list_null
-    #         self.get_connected_components = self._get_connected_components_null
-    #         # percentile method incompatible with defining UMI groups
-    #         self.get_groups = self._group_percentile
-    #
-    #     elif cluster_method == "unique":
-    #         self.get_adj_list = self._get_adj_list_null
-    #         self.get_connected_components = self._get_connected_components_null
-    #         self.get_groups = self._group_unique
 
-    def __call__(self, umis, counts, threshold, cluster_method):
-        '''Counts is a directionary that maps UMIs to their counts'''
+        # self.max_umis_per_position = 0
+        # self.total_umis_per_position = 0
+        # self.positions = 0
 
-        # umis = list(umis)
-        #
-        # self.positions += 1
-        #
-        # number_of_umis = len(umis)
-        #
+        # if cluster_method == "adjacency":
+            # self.get_adj_list = self._get_adj_list_adjacency
+            # self.get_connected_components = self._get_connected_components_adjacency
+            # self.get_groups = self._group_adjacency
+
+        # elif cluster_method == "directional":
+            # self.get_adj_list = self._get_adj_list_directional
+            # self.get_connected_components = self._get_connected_components_adjacency
+            # self.get_groups = self._group_directional
+
+        # elif cluster_method == "cluster":
+            # self.get_adj_list = self._get_adj_list_adjacency
+            # self.get_connected_components = self._get_connected_components_adjacency
+            # self.get_groups = self._group_cluster
+
+        # elif cluster_method == "percentile":
+            # self.get_adj_list = self._get_adj_list_null
+            # self.get_connected_components = self._get_connected_components_null
+            # percentile method incompatible with defining UMI groups
+            # self.get_groups = self._group_percentile
+
+        # elif cluster_method == "unique":
+            # self.get_adj_list = self._get_adj_list_null
+            # self.get_connected_components = self._get_connected_components_null
+            # self.get_groups = self._group_unique
+
+    def __call__(self, umis, threshold, cluster_method):
+        '''umis is a dictionary that maps UMIs to their counts'''
+
+        counts = umis
+        umis = list(umis.keys())
+
+        #self.positions += 1
+
+        #number_of_umis = len(umis)
+
         # self.total_umis_per_position += number_of_umis
-        #
+
         # if number_of_umis > self.max_umis_per_position:
-        #     self.max_umis_per_position = number_of_umis
+            # self.max_umis_per_position = number_of_umis
 
         len_umis = [len(x) for x in umis]
 
@@ -495,7 +491,7 @@ class ReadDeduplicator:
         umis = bundle.keys()
         counts = {umi: bundle[umi]["count"] for umi in umis}
 
-        clusters = self.UMIClusterer(umis, counts, threshold)
+        clusters = self.UMIClusterer(counts, threshold)
 
         final_umis = [cluster[0] for cluster in clusters]
         umi_counts = [sum(counts[umi] for umi in cluster)
