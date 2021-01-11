@@ -121,7 +121,7 @@ class TapestriTube(object):
         total_reads = 0     # total count of all reads
         invalid_reads = 0   # no valid barcode found
         valid_reads = 0     # valid, barcoded read count
-        too_short = 0
+        too_short = 0       # reads that are too short count
 
         # iterate through info file (barcodes) and trim file (reads)
         for bar_line, trim_line in zip(bar_file.stdout, trim_file.stdout):
@@ -204,6 +204,12 @@ class TapestriTube(object):
 
                     valid_reads += 1
 
+                    # TODO print barcode extraction stats to file
+                    # print('total: %d' % total_reads)
+                    # print('valid: %d' % valid_reads)
+                    # print('invalid: %d' % invalid_reads)
+                    # print('too short: %d' % too_short)
+
         print('Tube %d-%s: %d valid trimmed pairs saved to file.' % (self.tube_num,
                                                                      library_type,
                                                                      valid_reads))
@@ -221,9 +227,8 @@ class TapestriTube(object):
         ab_reads_file = open(self.ab_reads, 'w')
 
         # use cutadapt to select reads with correct structure
-        ab_cmd = 'cutadapt -j 8 %s -O 12 -e 0.2 -n %d %s --quiet --discard-untrimmed' % (ab_handles,
-                                                                                         len(ab_handles),
-                                                                                         self.ab_r2_temp)
+        ab_cmd = 'cutadapt -j 8 %s -O 12 -e 0.2 -n 2 %s --quiet --discard-untrimmed' % (ab_handles,
+                                                                                        self.ab_r2_temp)
 
         ab_process = subprocess.Popen(ab_cmd, stdout=subprocess.PIPE, shell=True, universal_newlines=True, bufsize=1)
 
@@ -244,7 +249,8 @@ class TapestriTube(object):
             # try ab matching to custom or totalseq tags using read length
             valid_length = False
 
-            # in range(len(ab_bar_coord))
+            # check all valid trimmed ab tag lengths
+            # TODO make this work even with two equal-sized tags
             for k in range(len(ab_bar_coord)):
 
                 # check trimmed read length
@@ -282,7 +288,7 @@ class TapestriTube(object):
         # print number of valid/invalid ab reads
         print('Tube ' + str(self.tube_num) + ': ' + str(valid_ab_reads) + ' VALID ab reads')
         print('Tube ' + str(self.tube_num) + ': ' + str(invalid_ab_reads) + ' INVALID ab reads')
-        # TODO save ab metrics to file
+        # TODO save ab and dna metrics to file
 
     def count_umis(self, clustering_method):
         # count umis using selected clustering methods
@@ -306,7 +312,10 @@ class TapestriTube(object):
         for line in ab_reads:
 
             group_id_curr = line.split('\t')[:2]
-            umi = line.strip().split('\t')[2]
+            try:
+                umi = line.strip().split('\t')[2]
+            except IndexError:
+                umi =''
 
             # still in same umi group
             if group_id_curr == group_id_prev or first_line:
@@ -340,15 +349,23 @@ class TapestriTube(object):
         group_umis = [u.encode() for u in group_umis]
         umi_counter = Counter(group_umis)
 
-        # set up UMIClusterer functor with parameters specific to specified method
-        # choose method = 'all' for all available methods
+        # some ab tags may not have umis (empty umi string)
+        # in this case, skip counting and set all counts - except 'raw' - to zero
+        if b'' in umi_counter:
+            counts = {}
+            for m in ['unique', 'adjacency', 'directional', 'percentile', 'cluster']:
+                counts[m] = str(len(group_umis))
 
-        processor = network.UMIClusterer()  # initialize UMIclusterer
+        else:
+            # set up UMIClusterer functor with parameters specific to specified method
+            # choose method = 'all' for all available methods
 
-        clusters = processor(umi_counter,
-                             threshold=1,
-                             cluster_method=clustering_method)
-        counts = {k: str(len(v)) for k, v in clusters.items()}
+            processor = network.UMIClusterer()  # initialize UMIclusterer
+
+            clusters = processor(umi_counter,
+                                 threshold=1,
+                                 cluster_method=clustering_method)
+            counts = {k: str(len(v)) for k, v in clusters.items()}
 
         counts['raw'] = str(len(group_umis))
 
@@ -557,8 +574,18 @@ def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=Non
     else:
         count_method_file = ab_dir_by_method + os.path.basename(umi_counts_merged)[:-3] + 'unique.cells.tsv'
 
-    ab_counts = pd.read_csv(count_method_file, sep='\t', header=0, index_col=0)
+    ab_counts_unique = pd.read_csv(count_method_file, sep='\t', header=0, index_col=0)
 
+    # ab_counts_unique is eventually passed to the hashing function
+
+    ab_counts_clr = calculate_clr(ab_counts_unique)
+
+    # save clr counts to file
+    ab_counts_clr.to_csv(path_or_buf=clr_count_file, sep='\t')
+
+    return count_method_file
+
+def calculate_clr(ab_counts):
     # calculate centered-log ratio transform (CLR) of ab counts
     # from cite-seq paper: CLR(x) = [ln(x1/g(x)), ln(x2/g(x)), ...]
     # where x is a vector of ab counts per cell, and g(x) is the geometric mean of counts per cell
@@ -573,10 +600,7 @@ def umi_counts_by_cell(umi_counts_merged, ab_barcode_csv_file, ab_dir, cells=Non
     # divide all cells by geometric mean and take natural log to yield clr
     ab_counts_clr = np.log(ab_counts_pseudo.divide(gmeans, axis=0))
 
-    # save clr counts to file
-    ab_counts_clr.to_csv(path_or_buf=clr_count_file, sep='\t')
-
-    return clr_count_file
+    return ab_counts_clr
 
 def load_barcodes(barcode_file, max_dist, check_barcodes):
     # loads barcodes from csv and checks all pairwise distances to ensure error correction will work
@@ -924,8 +948,8 @@ def vcf_to_tables(vcf_file, genotype_file, variants_tsv, ploidy, itd_vcf_file=Fa
         f.create_dataset('DP', data=np.transpose(DP), dtype='i2', compression='gzip')
         f.create_dataset('AD', data=np.transpose(AD), dtype='i2', compression='gzip')
         f.create_dataset('RD', data=np.transpose(RD), dtype='i2', compression='gzip')
-        f.create_dataset('VARIANTS', data=names, compression='gzip')
         f.create_dataset('CELL_BARCODES', data=barcodes, compression='gzip')
+        f.create_dataset('VARIANTS', data=names, compression='gzip')
 
 def add_amplicon_counts(geno_hdf5, sample_names, tsvs):
     # add amplicon counts to compressed hdf5 file
@@ -954,15 +978,26 @@ def add_amplicon_counts(geno_hdf5, sample_names, tsvs):
     # save list of amplicon names to the hdf5 file
     with h5py.File(geno_hdf5, 'a') as f:
         amplicon_names = [a.encode('utf8') for a in list(amplicon_dataframes[0].columns)]
-        f.create_dataset('AMPLICON_NAMES', data=amplicon_names, compression='gzip')
+        f.create_dataset('AMPLICONS/NAMES', data=amplicon_names, compression='gzip')
 
     # save the amplicon count table to the hdf5 file
     # reorder the amplicon table to the same as the cell barcodes list
     all_counts = pd.concat(amplicon_dataframes)
     with h5py.File(geno_hdf5, 'a') as f:
         dataset = np.asarray(all_counts.reindex(cell_barcodes))
-        f.create_dataset('AMPLICON_COUNTS', data=dataset, dtype='i4', compression='gzip')
+        f.create_dataset('AMPLICONS/COUNTS', data=dataset, dtype='i4', compression='gzip')
 
+def add_hashes(geno_hdf5, hash_tables):
+    # add hash tables to compressed hdf5 file, one per sample
+
+    sample_names = [os.path.basename(f).split('.sample_hashes.')[0] for f in hash_tables]
+    with h5py.File(geno_hdf5, 'a') as f:
+        for i in range(len(hash_tables)):
+            hash_df = pd.read_csv(hash_tables[i], delimiter='\t', header=0, index_col=0)
+            hashes = [a.encode('utf8') for a in list(hash_df['sample'])]
+            sample_cell_barcodes = [a.encode('utf8') for a in list(hash_df.index)]
+            f.create_dataset('HASHES/%s/SAMPLES' % sample_names[i], data=hashes, compression='gzip')
+            f.create_dataset('HASHES/%s/BARCODES' % sample_names[i], data=sample_cell_barcodes, compression='gzip')
 
 def add_hdf5_ab_counts(geno_hdf5, sample_names, ab_count_dirs):
     # add ab counts to compressed hdf5 file
@@ -1009,7 +1044,10 @@ def add_hdf5_ab_counts(geno_hdf5, sample_names, ab_count_dirs):
     for m in count_methods_by_sample:
         with h5py.File(geno_hdf5, 'a') as f:
             dataset = np.asarray(count_methods_by_sample[m].reindex(cell_barcodes))
-            f.create_dataset('ABS/'+m, data=dataset, dtype='i4', compression='gzip')
+            if m == 'clr':
+                f.create_dataset('ABS/' + m, data=dataset, dtype='float64', compression='gzip')
+            else:
+                f.create_dataset('ABS/'+m, data=dataset, dtype='i4', compression='gzip')
 
 def GLM_regression(hdf5_path, covariables, antibodies=[], components=1, offset=False):
     '''Perform general linear model regression of each Ab vector with provided covariables.
@@ -1021,7 +1059,7 @@ def GLM_regression(hdf5_path, covariables, antibodies=[], components=1, offset=F
 
     # dna panel
     amplicon_total = pd.DataFrame(
-        pd.DataFrame(h5py.File(hdf5_path, 'r')['AMPLICON_COUNTS'], index=cell_barcodes).sum(axis=1),
+        pd.DataFrame(h5py.File(hdf5_path, 'r')['AMPLICONS/COUNTS'], index=cell_barcodes).sum(axis=1),
         columns=['amplicon_total'])
 
     # ab panel
@@ -1034,7 +1072,7 @@ def GLM_regression(hdf5_path, covariables, antibodies=[], components=1, offset=F
 
     # get IgG1 counts, if available
     if 'IgG1' not in ab_names and 'IgG1' in covariables:
-        print('IgG1 not in experiment and cannot be used as a covariable!')
+        print('IgG1 not in experiment and cannot be used as a covariable!\n')
         covariables.remove('IgG1')
 
     if 'IgG1' in ab_names:
