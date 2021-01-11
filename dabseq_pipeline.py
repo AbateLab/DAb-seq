@@ -577,18 +577,17 @@ if __name__ == "__main__":
             if not dna_only:
                 # create table of per-cell ab counts for valid cells only
                 # also calculate clr for valid cells
-                ab_clr_counts_file = resources.umi_counts_by_cell(umi_counts_merged,
-                                                                  ab_barcode_csv,
-                                                                  ab_dir,
-                                                                  cells)
+                ab_counts_unique = resources.umi_counts_by_cell(umi_counts_merged,
+                                                                ab_barcode_csv,
+                                                                ab_dir,
+                                                                cells)
 
                 # if cell hashing csv is specified, demultiplex cells
                 if hash_csv is not None:
-                    hash_demux.demux_cells(ab_clr_counts_file,
+                    hash_demux.demux_cells(ab_counts_unique,
                                            hash_csv,
-                                           ab_dir + 'hashes/')
-
-
+                                           ab_dir + 'hashes/',
+                                           clr_abs='hashing_only')
 
             print('''
 ###################################################################################
@@ -596,8 +595,7 @@ if __name__ == "__main__":
 ###################################################################################
 ''')
 
-            # check that all barcodes have the same length
-            # this ensures demultiplexing will work correctly
+            # check that all barcodes have the same length for demultiplexing
             bar_length = list(set([len(k) for k in valid_cells]))
             assert len(bar_length) == 1, 'All barcodes must have the same length!'
 
@@ -944,6 +942,12 @@ if __name__ == "__main__":
         # add amplicon count tables (from valid cells) to hdf5 file
         amplicon_counts_tsvs = [cohort_dir + s + '/barcodes/' + s + '.cells.tsv' for s in sample_names]
         resources.add_amplicon_counts(geno_hdf5, sample_names, amplicon_counts_tsvs)
+
+        # add hashing tables, if available, to hdf5 file
+        hash_tables = [cohort_dir + s + '/abs/hashes/' + s + '.sample_hashes.tsv' for s in sample_names]
+        hash_tables = [f for f in hash_tables if os.path.isfile(f)]
+        if len(hash_tables) > 0:
+            resources.add_hashes(geno_hdf5, hash_tables)
 
         # if abs in experiment, add counts to hdf5 file
         # also perform antibody correction using GLM
