@@ -147,7 +147,7 @@ def knee_plot(all_df, cell_df, output_file, note=''):
     plt.figure(figsize=(7, 7))
     ax = plt.axes()
     ax.grid()
-    plt.loglog(range(len(reads_per_cell)), reads_per_cell, color='k', linewidth=1.5)
+    plt.loglog(range(1, len(reads_per_cell) + 1), reads_per_cell, color='k', linewidth=1.5)
     plt.axvline(x=n_cells, color='k', linestyle='--', label='Cell Threshold')
     plt.xlabel('Cell Barcode #', fontsize=18, labelpad=12)
     plt.ylabel('Reads per Cell Barcode', fontsize=18, labelpad=12)
