@@ -91,6 +91,7 @@ RUN rm -rf samtools-1.8/
 RUN pip3 install numpy==1.19.2
 RUN pip3 install scipy==1.5.2
 RUN pip3 install pandas==1.1.3
+RUN pip3 install tables==3.6.1
 RUN pip3 install regex==2020.10.15
 RUN pip3 install h5py==2.10.0
 RUN pip3 install matplotlib==3.3.2
