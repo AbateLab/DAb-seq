@@ -23,7 +23,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 plt.rcParams['axes.unicode_minus'] = False
 
-def call(output_folder, experiment_name, method='second_derivative', threshold=True):
+def call(output_folder, experiment_name, min_reads, method='second_derivative', threshold=True):
     # call cells using selected method. returns list of valid cell barcodes.
     # if threshold is on, further refine to cells with 'min_coverage' in 'min_fraction' intervals.
 
@@ -45,7 +45,10 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     reads_per_cell, barcodes = (list(t) for t in zip(*sorted(zip(reads_per_cell, barcodes), reverse=True)))
 
     # available cell calling methods
-    calling_methods = ['second_derivative', 'simple_minimum']
+    calling_methods = ['second_derivative', 'simple_minimum', 'hard_cutoff']
+
+    if min_reads is not None:
+        method = 'hard_cutoff'
 
     if method == 'second_derivative':
         # this method uses the second derivative (inflection point) of the knee plot to identify cells
@@ -93,12 +96,17 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
             method = 'simple_minimum'
 
     if method == 'simple_minimum':
-        # this method uses a simple minimum number of reads per cells to call cells
+        # this method uses a simple minimum number of reads per cell to call cells
         # min_reads_per_cell = min_coverage * min_fraction * num_targets
 
         num_targets = len(all_df.columns) - 1
         min_reads_per_cell = min_coverage * min_fraction * num_targets
         cell_barcodes = [barcodes[i] for i in range(len(barcodes)) if reads_per_cell[i] >= min_reads_per_cell]
+
+    if method == 'hard_cutoff':
+        # this method uses a hard cutoff as a minimum number of reads per cell to call cells
+
+        cell_barcodes = [barcodes[i] for i in range(len(barcodes)) if reads_per_cell[i] >= min_reads]
 
     if method not in calling_methods:
         print('Invalid method selected. Exiting...')
@@ -125,8 +133,10 @@ def call(output_folder, experiment_name, method='second_derivative', threshold=T
     kneeplot_path = output_folder + experiment_name + '.kneeplot.png'
     boxplot_path = output_folder + experiment_name + '.amplicon_boxplot.png'
 
-    # if simple threshold was used, indicate on the plot
-    if method == 'simple_minimum':
+    # if specific cell calling thresholds were used, indicate on the plot
+    if method == 'hard_cutoff':
+        note = 'MIN READS PER CELL = %d' % min_reads
+    elif method == 'simple_minimum':
         note = 'SIMPLE MINIMUM MODE ON'
     else:
         note = ''

@@ -114,6 +114,9 @@ if __name__ == "__main__":
     parser.add_argument('--ignore-panel-uniformity', action='store_true', default=False,
                         help='option to ignore panel uniformity threshold when calling cells (default cell threshold '
                              'is 60% of amplicons with >= 10X coverage)')
+    parser.add_argument('--min-reads', type=int, default=None,
+                        help='minimum number of reads for cell calling. when set, will override all other cell calling'
+                        ' criteria and only use this read threshold.')
     parser.add_argument('--ploidy', type=int, default=2, choices=[1, 2],
                         help='organism ploidy (default: 2) [haploid (1) or diploid (2) supported only]')
 
@@ -137,6 +140,7 @@ if __name__ == "__main__":
     skip_flt3 = args.skip_flt3
     non_human = args.non_human
     ignore_panel_uniformity = args.ignore_panel_uniformity
+    min_reads = args.min_reads
     ploidy = args.ploidy
 
     # require a sample name when in barcoding mode (or both)
@@ -187,6 +191,12 @@ if __name__ == "__main__":
     # skip flt3 calling when using non-human references
     if non_human:
         skip_flt3 = True
+
+    # ensure min_reads, if set, is a positive number
+    if min_reads is not None:
+        if min_reads < 1:
+            print('Minimum number of reads must be positive.')
+            raise SystemExit
 
     # load config file variables
     # be careful about using exec - never run this pipeline as root
@@ -561,8 +571,11 @@ if __name__ == "__main__":
             # call valid cells using cell_caller function
             valid_cells = cell_calling.call(barcode_dir,
                                             sample_name,
+                                            min_reads,
                                             'second_derivative',
                                             threshold=(not ignore_panel_uniformity))
+
+            raise SystemExit
 
             # create SingleCell objects for each valid cell
             cells = [resources.SingleCell(barcode,
@@ -766,7 +779,7 @@ if __name__ == "__main__":
 
                 itd_files.append([itd_folder + b.decode('utf-8') + '.flt3itd.vcf' for b in s_itd])
 
-        # # base path for genomics db
+        # base path for genomics db
         db_dir = cohort_genotyping_dir + 'dbs/'
         if os.path.exists(db_dir):
             print('The genomics DB directory %s already exists. Please delete or rename it.\n' % db_dir)
