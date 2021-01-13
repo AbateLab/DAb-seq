@@ -575,8 +575,6 @@ if __name__ == "__main__":
                                             'second_derivative',
                                             threshold=(not ignore_panel_uniformity))
 
-            raise SystemExit
-
             # create SingleCell objects for each valid cell
             cells = [resources.SingleCell(barcode,
                                           by_cell_fastq_dir,
