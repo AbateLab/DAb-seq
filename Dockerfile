@@ -107,7 +107,7 @@ RUN chmod -R 777 /input
 
 # get pipeline files from dab-seq repo
 WORKDIR /dabseq/pipeline
-RUN git clone git@github.com:AbateLab/DAb-seq
+RUN git clone https://github.com/AbateLab/DAb-seq.git
 ENTRYPOINT ["python3", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
 
 FROM base-build AS human-build
