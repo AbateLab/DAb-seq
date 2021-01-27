@@ -3,12 +3,12 @@
 
 ## Introduction
 
-DAb-seq is a multiomic tool that combines targeted genotyping and immunophenotyping in single cells. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analogous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
+DAb-seq is a multiomic tool combining targeted genotyping and immunophenotyping in single cells. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analogous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
 
 ![DAb-seq Workflow](https://i.imgur.com/2Z2GTey.png)
 <p align="center"><i>The experimental DAb-seq workflow, from sample collection to bioinformatics.</i><br></p>
 
-The DAb-seq data analysis pipeline incorporates elements of targeted DNA genotyping and digital fragment counting. The primary outputs of the pipeline are a genotyping matrix of variant calls by cell and a matrix of antibody UMI counts by cell.
+The DAb-seq data analysis pipeline includes modules for targeted DNA genotyping and antibody tag counting. The primary outputs of the pipeline are a genotyping matrix of variant calls by cell and a matrix of antibody UMI counts by cell.
 
 ## Input File Requirements
 
@@ -96,7 +96,7 @@ Output genotyping data is saved in a new directory labeled `GENOTYPING` in the r
 * Homozygous Alternate (2)
 * No Call (3)
 
-Further details on reading and manipulating data from this file can be found in the included Python notebook in the 'sample_data' folder.
+Further details on reading and manipulating data from this file can be found in the included Python notebook in the `sample_data` folder.
 
 ## Non-Human Organism Support
 
@@ -104,4 +104,4 @@ The DAb-seq pipeline includes support for non-human organisms using the flag `--
 
 ## Sequencing Data and Examples
 
-All data from the initial DAb-seq publication is available in FASTQ format at on the [NCBI Sequence Read Archive](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA602320). In addition, the compressed HDF5 file for the three cell line validation experiment is included in the 'sample_data' folder of this repository. A Jupyter Notebook providing example analysis code is also included in this folder.
+All data from the initial DAb-seq publication is available in FASTQ format at on the [NCBI Sequence Read Archive](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA602320). In addition, the compressed HDF5 file for the three cell line validation experiment is included in the `sample_data` folder of this repository. A Jupyter Notebook providing example analysis code is also included in this folder.
