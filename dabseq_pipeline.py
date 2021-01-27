@@ -656,17 +656,22 @@ if __name__ == "__main__":
             # optionally, call FLT3-ITDs using ITDseek
             if not skip_flt3:
 
+                # limit number of cells for flt3 calling at a time (based on hardware limitations)
+                n_flt3_calling = 500
+                if n_flt3_calling > len(cells):
+                    n_flt3_calling = len(cells)
+
                 # verify flt3 folder is empty before continuing (remove and recreate folder)
                 shutil.rmtree(by_cell_flt3_dir)
                 os.mkdir(by_cell_flt3_dir)
 
-                preprocess_pool = ThreadPool(processes=n_preprocess)
+                flt3_pool = ThreadPool(processes=n_flt3_calling)
 
                 for c in cells:
-                    preprocess_pool.apply_async(resources.SingleCell.call_flt3, args=(c, ref_fasta_file,))
+                    flt3_pool.apply_async(resources.SingleCell.call_flt3, args=(c, ref_fasta_file,))
 
-                preprocess_pool.close()
-                preprocess_pool.join()
+                flt3_pool.close()
+                flt3_pool.join()
 
             else:
                 os.rmdir(by_cell_flt3_dir)
