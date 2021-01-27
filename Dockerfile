@@ -1,5 +1,5 @@
 # DAb-seq Dockerfile
-# Ben Demaree 3.30.2020
+# Ben Demaree 1.26.2021
 
 # start with ubuntu base
 FROM ubuntu:18.04 AS base-build
@@ -105,14 +105,7 @@ RUN pip3 install slackclient==2.9.2
 RUN mkdir /input
 RUN chmod -R 777 /input
 
-### get dab-seq private repo files
-# before building: export SSH_PRIVATE_KEY="$(cat /home/bdemaree/.ssh/dab_seq_key)"
-ARG SSH_PRIVATE_KEY
-RUN mkdir /root/.ssh/
-RUN echo "${SSH_PRIVATE_KEY}" > /root/.ssh/id_rsa
-RUN chmod 400 /root/.ssh/id_rsa
-RUN touch /root/.ssh/known_hosts
-RUN ssh-keyscan github.com >> /root/.ssh/known_hosts
+# get pipeline files from dab-seq repo
 WORKDIR /dabseq/pipeline
 RUN git clone git@github.com:AbateLab/DAb-seq
 ENTRYPOINT ["python3", "/dabseq/pipeline/DAb-seq/dabseq_pipeline.py"]
