@@ -3,12 +3,12 @@
 
 ## Introduction
 
-DAb-seq is a multiomic platform combining targeted genotyping and immunophenotyping at the single-cell level. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analogous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
+DAb-seq is a multiomic tool that combines targeted genotyping and immunophenotyping in single cells. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analogous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
 
 ![DAb-seq Workflow](https://i.imgur.com/2Z2GTey.png)
 <p align="center"><i>The experimental DAb-seq workflow, from sample collection to bioinformatics.</i><br></p>
 
-The DAb-seq data analysis pipeline incorporates elements of targeted DNA genotyping and digital fragment counting, as in RNA-seq. The primary output of the pipeline is a genotyping matrix of calls by cell, and a counts matrix of antibody UMI counts by cell.
+The DAb-seq data analysis pipeline incorporates elements of targeted DNA genotyping and digital fragment counting. The primary outputs of the pipeline are a genotyping matrix of variant calls by cell and a matrix of antibody UMI counts by cell.
 
 ## Input File Requirements
 
@@ -56,7 +56,7 @@ In `genotype` mode, the pipeline calls variants for a single cohort, containing 
 
 ## DAb-seq in Docker
 
-Running the DAb-seq pipeline in a Docker container is recommended and ensures that the pipeline dependencies are installed and configured properly.
+Running the DAb-seq pipeline in a Docker container is recommended and ensures that the pipeline dependencies are installed and configured properly. The Docker image is hosted on [DockerHub](https://hub.docker.com/r/bendemaree/dab-seq).
 
 1. Build the DAb-seq image using Docker:
 ```
@@ -81,7 +81,7 @@ That's it! The pipeline will run in the Docker container and produce output file
 
 ## Memory and CPU Considerations
 
-DNA genotyping is CPU and memory-intensive for a single bulk sample, let alone thousands of single cells. The DAb-seq pipeline is implemented with tunable parallelization to scale to the resources available on different systems. In its default configuration, the pipeline requires at least 64 gb of memory and 16 physical threads to run. Changing the amount of cells aligned simultaneously or the number of genomic intervals genotyped in parallel can reduce this hardware requirement significantly, with a corresponding increase in total processing time.
+DNA genotyping is CPU and memory-intensive, particularly when processing thousands of single-cell samples. The DAb-seq pipeline is implemented with tunable parallelization to scale to the resources available on different systems. In its default configuration, the pipeline requires at least 64 gb of memory and 16 physical threads to run. Changing the amount of cells aligned simultaneously or the number of genomic intervals genotyped in parallel can reduce this hardware requirement significantly, with a corresponding increase in total processing time.
 
 ## Output Files
 
@@ -92,16 +92,16 @@ DNA genotyping is CPU and memory-intensive for a single bulk sample, let alone t
 Output genotyping data is saved in a new directory labeled `GENOTYPING` in the root of each cohort. A compresed HDF5 file contains matrices of discrete genotyping calls and antibody UMI counts for all cells in the cohort. Genotyping calls for each variant assume a genome ploidy of 2. Therefore, there are four possible genotypes per matrix entry:
 
 * Wildtype (0)
-* Heterozygous Mutant (1)
-* Homozygous Mutant (2)
+* Heterozygous Alternate (1)
+* Homozygous Alternate (2)
 * No Call (3)
 
-Further details on reading and manipulating data from this file can be found in the included Python notebooks.
+Further details on reading and manipulating data from this file can be found in the included Python notebook in the 'sample_data' folder.
 
 ## Non-Human Organism Support
 
 The DAb-seq pipeline includes support for non-human organisms using the flag `--non-human`. When combined with additional settings such as `--ploidy 1`, the pipeline can be used to perform single-cell genotyping on haploid bacteria and yeast cells.
 
-## Sequencing Data
+## Sequencing Data and Examples
 
-All data from the initial DAb-seq publication is available in FASTQ format at on the [NCBI Sequence Read Archive](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA602320). In addition, the compressed HDF5 file for the three cell line validation experiment is included in this repositiory as sample data (3_cell_experiment.hdf5).
+All data from the initial DAb-seq publication is available in FASTQ format at on the [NCBI Sequence Read Archive](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA602320). In addition, the compressed HDF5 file for the three cell line validation experiment is included in the 'sample_data' folder of this repository. A Jupyter Notebook providing example analysis code is also included in this folder.
