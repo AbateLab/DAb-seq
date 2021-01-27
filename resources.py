@@ -597,7 +597,7 @@ def calculate_clr(ab_counts):
     # calculate geometric mean of each cell
     gmeans = gmean(ab_counts_pseudo, axis=1)
 
-    # divide all cells by geometric mean and take natural log to yield clr
+    # divide all cells by their geometric mean and take natural log to yield clr
     ab_counts_clr = np.log(ab_counts_pseudo.divide(gmeans, axis=0))
 
     return ab_counts_clr
