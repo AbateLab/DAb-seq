@@ -84,8 +84,8 @@ if __name__ == "__main__":
     # optional arguments
     parser.add_argument('--sample-name', default=None, type=str,
                         help='sample name (required when mode is "barcoding" or "both")')
-    parser.add_argument('--chem', type=str, default='V2', choices=['V1', 'V2'],
-                        help='chemistry version (V1 or V2) (default: V2)')
+    parser.add_argument('--chem', type=str, default='V2', choices=['V1', 'V2', 'V2.1'],
+                        help='chemistry version (V1, V2, V2.1) (default: V2)')
     parser.add_argument('--slack-token', type=str, default=None,
                         help='option to provide slack token string')
     parser.add_argument('--dna-only', action='store_true', default=False,
@@ -362,7 +362,7 @@ if __name__ == "__main__":
 
             bar_ind_1, bar_ind_2 = list(range(8)), list(range(-8, 0))
 
-        elif chem == 'V2':
+        elif chem == 'V2' or chem == 'V2.1':
             cell_barcode_csv_file = sys.path[0] + '/barcodes/mb_cell_barcodes_v2.csv'
 
             r1_start = 'GTACTCGCAGTAGTC'
@@ -447,7 +447,8 @@ if __name__ == "__main__":
                           bar_ind_2,
                           r1_min_len_panel,
                           r2_min_len_panel,
-                          'panel'))
+                          'panel',
+                          chem))
                 process_barcodes.append(p)
                 p.start()
 
@@ -463,7 +464,8 @@ if __name__ == "__main__":
                           bar_ind_2,
                           r1_min_len_ab,
                           r2_min_len_ab,
-                          'ab'))
+                          'ab',
+                          chem))
                 process_barcodes.append(p)
                 p.start()
 
@@ -574,6 +576,11 @@ if __name__ == "__main__":
                                             min_reads,
                                             'second_derivative',
                                             threshold=(not ignore_panel_uniformity))
+
+            # check that valid cell barcodes were found
+            if len(valid_cells) == 0:
+                print('No valid cells found! Please check input files.')
+                raise SystemExit
 
             # create SingleCell objects for each valid cell
             cells = [resources.SingleCell(barcode,

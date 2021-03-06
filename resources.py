@@ -74,7 +74,8 @@ class TapestriTube(object):
                       bar_ind_2,
                       r1_min_len,
                       r2_min_len,
-                      library_type):
+                      library_type,
+                      chem):
         # for valid reads, add barcode header to fastq file and trim
 
         assert library_type == 'ab' or library_type == 'panel', 'Library type must be panel or ab!'
@@ -88,10 +89,18 @@ class TapestriTube(object):
             r1_out = open(self.panel_r1_temp, 'w')
             r2_out = open(self.panel_r2_temp, 'w')
 
-            trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -U 5 -n 2 %s %s --quiet' % (r1_end,
-                                                                                                  r2_end,
-                                                                                                  r1_in,
-                                                                                                  r2_in)
+            # for all chemistries except V2.1
+            if chem != 'V2.1':
+                trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -U 5 -n 2 %s %s --quiet' % (r1_end,
+                                                                                                      r2_end,
+                                                                                                      r1_in,
+                                                                                                      r2_in)
+            # for V2.1 chemistry, extend the hard cut
+            else:
+                trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 72 -U 5 -n 2 %s %s --quiet' % (r1_end,
+                                                                                                      r2_end,
+                                                                                                      r1_in,
+                                                                                                      r2_in)
 
         elif library_type == 'ab':
 
@@ -101,10 +110,18 @@ class TapestriTube(object):
             r1_out = open(self.ab_r1_temp, 'w')
             r2_out = open(self.ab_r2_temp, 'w')
 
-            trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -n 2 %s %s --quiet' % (r1_end,
-                                                                                             r2_end,
-                                                                                             r1_in,
-                                                                                             r2_in)
+            # for all chemistries except V2.1
+            if chem != 'V2.1':
+                trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 55 -n 2 %s %s --quiet' % (r1_end,
+                                                                                                 r2_end,
+                                                                                                 r1_in,
+                                                                                                 r2_in)
+            # for V2.1 chemistry, extend the hard cut
+            else:
+                trim_cmd = 'cutadapt -a %s -A %s --interleaved -j 8 -u 72 -n 2 %s %s --quiet' % (r1_end,
+                                                                                                 r2_end,
+                                                                                                 r1_in,
+                                                                                                 r2_in)
 
         # trim 5' end of read and check barcode
         bar_cmd = 'cutadapt -a %s -O 8 -e 0.2 %s -j 8 --quiet' % (r1_start,
