@@ -85,9 +85,9 @@ def demux_cells(ab_count_file, hash_csv, hashing_folder, clr_abs='hashing_only')
         kde_x, kde_y = sns.kdeplot(data, bw_method=0.2, lw=0).lines[0].get_data()
         peaks, _ = find_peaks(kde_y, prominence=1e-3)
         if len(peaks) >= 1:
-            expected = (kde_x[peaks[0]], 1, 50)
+            expected = (kde_x[peaks[0]], 0.1, 50)
         else:
-            expected = (-2, 1, 50)
+            expected = (-2, 0.1, 50)
 
         # fit the gaussian to the data
         params, cov = curve_fit(gauss, x, y, expected)
@@ -97,8 +97,8 @@ def demux_cells(ab_count_file, hash_csv, hashing_folder, clr_abs='hashing_only')
         plt.xlabel('CLR')
         plt.ylabel('# Cells')
 
-        # set the threshold at the 99th percentile of the negative distribution
-        thresh = norm(params[0], params[1]).ppf(0.99)
+        # set the threshold at the 99.9th percentile of the negative distribution
+        thresh = norm(params[0], params[1]).ppf(0.999)
         thresholds.append(thresh)
         plt.axvline(x=thresh, linestyle=':', lw=2, c=color)
         print(h + ': ' + str(thresh))
