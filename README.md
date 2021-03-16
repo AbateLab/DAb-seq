@@ -3,7 +3,9 @@
 
 Published as: Demaree*, B., Delley*, C.L., Vasudevan, H.N. et al. [Joint profiling of DNA and proteins in single cells to dissect genotype-phenotype associations in leukemia.](https://doi.org/10.1038/s41467-021-21810-3) Nature Communications 12, 1583 (2021).
 
-Cite this repository: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4495688.svg)](https://doi.org/10.5281/zenodo.4495688)
+Cite this repository:
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4495688.svg)](https://doi.org/10.5281/zenodo.4495688)
 
 ## Introduction
 
