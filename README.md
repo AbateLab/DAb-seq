@@ -1,6 +1,10 @@
 # DAb-seq
 <i>DAb-seq: combined single-cell DNA and Antibody sequencing.</i>
 
+Published as: Demaree*, B., Delley*, C.L., Vasudevan, H.N. et al. [Joint profiling of DNA and proteins in single cells to dissect genotype-phenotype associations in leukemia.](https://doi.org/10.1038/s41467-021-21810-3) Nature Communications 12, 1583 (2021).
+
+Cite this repository: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.4495688.svg)](https://doi.org/10.5281/zenodo.4495688)
+
 ## Introduction
 
 DAb-seq is a multiomic tool combining targeted genotyping and immunophenotyping in single cells. Through the use of DNA-antibody conjugates, phenotypic signal is encoded into next-generation sequencing data, providing a readout analogous to that of flow cytometry. The result is a dataset of linked proteogenomic information from thousands of single cells.
