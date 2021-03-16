@@ -53,9 +53,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='''
     
     dab-seq: single-cell dna genotyping and antibody sequencing
-    ben demaree 2020
+    ben demaree 2021
     
-    input requirements:
+    minimum input requirements:
     -config file defining file paths and variables (e.g. dabseq.hg19.cfg)
     -raw fastq files (targeted sequencing panel and/or antibody tags)
     -cell and ab barcode csvs
@@ -71,6 +71,9 @@ if __name__ == "__main__":
     -cutadapt
     -bbmap
     -snpeff
+    
+    See GitHub for full manual:
+    https://github.com/AbateLab/DAb-seq
     ''', formatter_class=argparse.RawTextHelpFormatter)
 
     # required arguments
@@ -119,6 +122,13 @@ if __name__ == "__main__":
                         ' criteria and only use this read threshold.')
     parser.add_argument('--ploidy', type=int, default=2, choices=[1, 2],
                         help='organism ploidy (default: 2) [haploid (1) or diploid (2) supported only]')
+    parser.add_argument('--n_parallel', nargs=4, type=int, default=[100, 30, 30, 30],
+                        help='Number of cells/intervals to process in parallel for the following operations:'
+                             '(1) Preprocessing (alignment, sorting, indexing)'
+                             '(2) HaplotypeCaller'
+                             '(3) GenomicsDBImport'
+                             '(4) GenotypeGVCFs'
+                             'Provide as space-delimited integers (default: 100 30 30 30)')
 
     # parse arguments
     args = parser.parse_args()
@@ -142,6 +152,7 @@ if __name__ == "__main__":
     ignore_panel_uniformity = args.ignore_panel_uniformity
     min_reads = args.min_reads
     ploidy = args.ploidy
+    n_parallel = args.n_parallel
 
     # require a sample name when in barcoding mode (or both)
     if ((pipeline_mode == 'barcode' or pipeline_mode == 'both') and sample_name is None) or sample_name == 'GENOTYPING':
@@ -196,6 +207,12 @@ if __name__ == "__main__":
     if min_reads is not None:
         if min_reads < 1:
             print('Minimum number of reads must be positive.')
+            raise SystemExit
+
+    # check parallel processing arguments
+    for n in n_parallel:
+        if n < 1:
+            print('Invalid parallel processing values given (must be > 0).')
             raise SystemExit
 
     # load config file variables
@@ -646,7 +663,7 @@ if __name__ == "__main__":
 ''')
 
             # limit number of cells to preprocess at a time (based on hardware limitations)
-            n_preprocess = 100  #100/300 standard/greyhound
+            n_preprocess = n_parallel[0]
             if n_preprocess > len(cells):
                 n_preprocess = len(cells)
 
@@ -698,7 +715,7 @@ if __name__ == "__main__":
             os.mkdir(by_cell_gvcf_dir)
 
             # limit number of cells to call variants at a time (based on hardware limitations)
-            n_call_variants = 30   #30/70 standard/greyhound
+            n_call_variants = n_parallel[1]
             if n_call_variants > len(cells):
                 n_call_variants = len(cells)
 
@@ -844,7 +861,7 @@ if __name__ == "__main__":
 ''')
 
         # limit number of intervals to import at a time (based on hardware limitations)
-        n_import = 30       #30/60 standard/greyhound
+        n_import = n_parallel[2]
         if n_import > len(intervals):
             n_import = len(intervals)
 
@@ -867,7 +884,7 @@ if __name__ == "__main__":
 ''')
 
         # limit number of intervals to import at a time (based on hardware limitations)
-        n_genotype = 30     #30/60 standard/greyhound
+        n_genotype = n_parallel[3]
         if n_genotype > len(intervals):
             n_genotype = len(intervals)
 
